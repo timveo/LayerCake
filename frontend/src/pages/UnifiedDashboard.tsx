@@ -1,24 +1,28 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ChatBubbleLeftRightIcon,
-  DocumentTextIcon,
   CodeBracketIcon,
-  MapIcon,
   ComputerDesktopIcon,
   PaperAirplaneIcon,
   StopIcon,
   SparklesIcon,
   CpuChipIcon,
   BanknotesIcon,
-  AcademicCapIcon,
   CheckCircleIcon,
   ClockIcon,
-  ExclamationTriangleIcon,
   BoltIcon,
-  BeakerIcon,
   HeartIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  DocumentIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
+  FlagIcon,
+  CheckIcon,
+  XMarkIcon,
+  SunIcon,
+  MoonIcon,
 } from '@heroicons/react/24/outline';
 import { projectsApi } from '../api/projects';
 
@@ -32,76 +36,637 @@ interface ChatMessage {
 
 interface ActivityEvent {
   id: string;
-  type: 'agent_start' | 'agent_complete' | 'gate_ready' | 'task_complete';
+  type: 'agent_start' | 'agent_complete' | 'gate_ready' | 'task_complete' | 'agent_working';
   message: string;
   timestamp: Date;
+  agent?: string;
+}
+
+interface FileTreeNode {
+  name: string;
+  type: 'file' | 'folder';
+  path: string;
+  children?: FileTreeNode[];
+  content?: string;
+}
+
+interface JourneyMilestone {
+  id: string;
+  title: string;
+  description: string;
+  status: 'completed' | 'current' | 'upcoming';
+  gate: string;
+  insights: string[];
+  celebration?: string;
+  achievements?: string[];
+}
+
+interface GateApprovalData {
+  gateNumber: number;
+  title: string;
+  description: string;
+  checklist: { item: string; completed: boolean }[];
+  artifacts: string[];
+  agentRecommendation: string;
 }
 
 type WorkspaceTab = 'ui' | 'docs' | 'code' | 'map';
+type MainView = 'dashboard' | 'projects';
 type Phase = 'plan' | 'dev' | 'ship';
-type SkillLevel = 'beginner' | 'intermediate' | 'expert';
+type ThemeMode = 'dark' | 'light';
+
+// All 14 agents from the system with phase assignments
+const ALL_AGENTS = [
+  { type: 'PRODUCT_MANAGER', name: 'Product Manager', icon: '📋', status: 'idle' as const, phase: 'plan' as Phase },
+  { type: 'ARCHITECT', name: 'Architect', icon: '🏗️', status: 'working' as const, phase: 'plan' as Phase },
+  { type: 'UX_UI_DESIGNER', name: 'UX/UI Designer', icon: '🎨', status: 'idle' as const, phase: 'plan' as Phase },
+  { type: 'FRONTEND_DEVELOPER', name: 'Frontend Dev', icon: '⚛️', status: 'idle' as const, phase: 'dev' as Phase },
+  { type: 'BACKEND_DEVELOPER', name: 'Backend Dev', icon: '⚙️', status: 'working' as const, phase: 'dev' as Phase },
+  { type: 'ML_ENGINEER', name: 'ML Engineer', icon: '🤖', status: 'idle' as const, phase: 'dev' as Phase },
+  { type: 'PROMPT_ENGINEER', name: 'Prompt Engineer', icon: '💬', status: 'idle' as const, phase: 'dev' as Phase },
+  { type: 'MODEL_EVALUATOR', name: 'Model Evaluator', icon: '📊', status: 'idle' as const, phase: 'dev' as Phase },
+  { type: 'DATA_ENGINEER', name: 'Data Engineer', icon: '📦', status: 'idle' as const, phase: 'dev' as Phase },
+  { type: 'QA_ENGINEER', name: 'QA Engineer', icon: '🧪', status: 'idle' as const, phase: 'ship' as Phase },
+  { type: 'SECURITY_ENGINEER', name: 'Security', icon: '🔒', status: 'idle' as const, phase: 'ship' as Phase },
+  { type: 'DEVOPS_ENGINEER', name: 'DevOps', icon: '🚀', status: 'idle' as const, phase: 'ship' as Phase },
+  { type: 'AIOPS_ENGINEER', name: 'AIOps', icon: '🔍', status: 'idle' as const, phase: 'ship' as Phase },
+  { type: 'ORCHESTRATOR', name: 'Orchestrator', icon: '🎯', status: 'working' as const, phase: 'plan' as Phase },
+];
+
+// Gates organized by phase
+const GATES_BY_PHASE: Record<Phase, number[]> = {
+  plan: [0, 1, 2, 3],
+  dev: [4, 5, 6],
+  ship: [7, 8, 9],
+};
+
+// Phase costs (mock data)
+const PHASE_COSTS: Record<Phase, { current: string; total: string }> = {
+  plan: { current: '$0.45', total: '$1.20' },
+  dev: { current: '$0.00', total: '$0.80' },
+  ship: { current: '$0.00', total: '$0.30' },
+};
 
 // Mock data
 const mockMessages: ChatMessage[] = [
-  { id: '1', role: 'system', content: 'Hey! I\'m here to help you build something amazing. What are we creating today?', timestamp: new Date(Date.now() - 300000) },
-  { id: '2', role: 'user', content: 'What should I work on first?', timestamp: new Date(Date.now() - 240000) },
-  { id: '3', role: 'assistant', content: 'Great question! Your PRD is ready for review. The Product Manager agent crafted some solid requirements. Want me to walk you through the key decisions? I can explain the reasoning behind each one.', timestamp: new Date(Date.now() - 180000) },
+  { id: '1', role: 'system', content: 'Agent Orchestrator online. Ready to coordinate your build.', timestamp: new Date(Date.now() - 300000) },
+  { id: '2', role: 'user', content: 'What agents are currently active?', timestamp: new Date(Date.now() - 240000) },
+  { id: '3', role: 'assistant', content: 'Currently running: Architect (designing system), Backend Dev (API scaffolding), and Orchestrator (coordinating). The Product Manager completed the PRD. Want me to activate more agents?', timestamp: new Date(Date.now() - 180000) },
 ];
 
 const mockActivity: ActivityEvent[] = [
-  { id: '1', type: 'agent_complete', message: 'Architect finished system design', timestamp: new Date(Date.now() - 60000) },
-  { id: '2', type: 'gate_ready', message: 'G2 ready for your review', timestamp: new Date(Date.now() - 120000) },
-  { id: '3', type: 'task_complete', message: 'Database schema validated', timestamp: new Date(Date.now() - 180000) },
+  { id: '1', type: 'agent_working', message: 'Architect designing microservices', timestamp: new Date(Date.now() - 30000), agent: 'Architect' },
+  { id: '2', type: 'agent_complete', message: 'PRD document finalized', timestamp: new Date(Date.now() - 60000), agent: 'Product Manager' },
+  { id: '3', type: 'gate_ready', message: 'G2 ready for review', timestamp: new Date(Date.now() - 120000) },
+  { id: '4', type: 'agent_working', message: 'Backend scaffolding API routes', timestamp: new Date(Date.now() - 150000), agent: 'Backend Dev' },
+  { id: '5', type: 'task_complete', message: 'Database schema validated', timestamp: new Date(Date.now() - 180000) },
+  { id: '6', type: 'agent_start', message: 'Orchestrator initialized', timestamp: new Date(Date.now() - 200000), agent: 'Orchestrator' },
 ];
 
 const mockTodos = [
-  { id: '1', text: 'Review PRD document', done: true },
-  { id: '2', text: 'Approve G2 Architecture gate', done: false },
-  { id: '3', text: 'Select design variant', done: false },
+  { id: '1', text: 'Review PRD document', done: true, priority: 'high' as const },
+  { id: '2', text: 'Approve G2 Architecture gate', done: false, priority: 'high' as const },
+  { id: '3', text: 'Select design variant', done: false, priority: 'medium' as const },
+  { id: '4', text: 'Review API contracts', done: false, priority: 'low' as const },
+  { id: '5', text: 'Configure CI/CD pipeline', done: false, priority: 'low' as const },
 ];
 
-// Ambient floating particles
-const FloatingParticle = ({ delay }: { delay: number }) => (
-  <motion.div
-    className="absolute w-1.5 h-1.5 rounded-full bg-primary-400/20"
-    initial={{ opacity: 0, scale: 0 }}
-    animate={{
-      opacity: [0, 0.6, 0],
-      scale: [0, 1, 0],
-      y: [0, -100],
-      x: [0, Math.random() * 40 - 20],
-    }}
-    transition={{
-      duration: 4,
-      delay,
-      repeat: Infinity,
-      ease: 'easeOut',
-    }}
-  />
+// Mock file tree for Code tab
+const mockFileTree: FileTreeNode[] = [
+  {
+    name: 'docs',
+    type: 'folder',
+    path: '/docs',
+    children: [
+      { name: 'README.md', type: 'file', path: '/docs/README.md', content: '# Project Documentation\n\nWelcome to the Fuzzy Llama project documentation.\n\n## Overview\n\nThis project uses a gated development process with 10 quality gates.\n\n## Getting Started\n\n1. Review the PRD\n2. Approve architecture decisions\n3. Begin development' },
+      { name: 'PRD.md', type: 'file', path: '/docs/PRD.md', content: '# Product Requirements Document\n\n## Vision\n\nBuild a comprehensive AI-powered development platform.\n\n## Goals\n\n- Automate repetitive coding tasks\n- Ensure quality through gates\n- Provide transparency in decisions\n\n## User Stories\n\n### As a developer\n- I want to see agent progress in real-time\n- I want to approve decisions at each gate' },
+      { name: 'ARCHITECTURE.md', type: 'file', path: '/docs/ARCHITECTURE.md', content: '# System Architecture\n\n## Overview\n\nMicroservices architecture with event-driven communication.\n\n## Components\n\n### Frontend\n- React with TypeScript\n- Tailwind CSS\n- Framer Motion\n\n### Backend\n- FastAPI (Python)\n- PostgreSQL\n- Redis for caching\n\n### AI Agents\n- 14 specialized agents\n- Orchestrator for coordination' },
+      { name: 'API.md', type: 'file', path: '/docs/API.md', content: '# API Documentation\n\n## Endpoints\n\n### Projects\n\n`GET /api/projects` - List all projects\n\n`POST /api/projects` - Create new project\n\n`GET /api/projects/:id` - Get project details\n\n### Agents\n\n`POST /api/agents/execute` - Run an agent\n\n`GET /api/agents/status` - Get agent status' },
+    ],
+  },
+  {
+    name: 'src',
+    type: 'folder',
+    path: '/src',
+    children: [
+      {
+        name: 'components',
+        type: 'folder',
+        path: '/src/components',
+        children: [
+          { name: 'README.md', type: 'file', path: '/src/components/README.md', content: '# Components\n\nReusable UI components for the application.\n\n## Structure\n\n- `ui/` - Base UI components (Button, Card, Input)\n- `layout/` - Layout components (MainLayout)\n- `gates/` - Gate-related components' },
+        ],
+      },
+      {
+        name: 'pages',
+        type: 'folder',
+        path: '/src/pages',
+        children: [
+          { name: 'README.md', type: 'file', path: '/src/pages/README.md', content: '# Pages\n\nApplication pages and routes.\n\n## Dashboard Variants\n\n1. **Mission Control** - NASA-inspired command center\n2. **Journey Map** - Story-driven progress\n3. **Living Canvas** - Organic ecosystem view\n4. **Unified Dashboard** - Combined experience' },
+        ],
+      },
+    ],
+  },
+  { name: 'CHANGELOG.md', type: 'file', path: '/CHANGELOG.md', content: '# Changelog\n\n## v0.3.0\n\n- Added biomorphic dashboard design\n- Integrated all 14 AI agents\n- Implemented real-time agent streaming\n\n## v0.2.0\n\n- Added gate approval workflow\n- Created proof artifact viewer\n- Implemented WebSocket connections\n\n## v0.1.0\n\n- Initial project setup\n- Basic dashboard structure\n- Authentication system' },
+  { name: 'CONTRIBUTING.md', type: 'file', path: '/CONTRIBUTING.md', content: '# Contributing Guide\n\n## Development Setup\n\n1. Clone the repository\n2. Install dependencies: `npm install`\n3. Start dev server: `npm run dev`\n\n## Code Style\n\n- Use TypeScript for all new code\n- Follow the existing patterns\n- Add tests for new features\n\n## Pull Requests\n\n- Create feature branches\n- Write clear commit messages\n- Request review from maintainers' },
+];
+
+// Mock gate approval data
+const mockGateApproval: GateApprovalData = {
+  gateNumber: 3,
+  title: 'Architecture Review',
+  description: 'The system architecture has been designed and is ready for approval. This gate ensures the technical foundation is solid before development begins.',
+  checklist: [
+    { item: 'Database schema reviewed', completed: true },
+    { item: 'API contracts defined', completed: true },
+    { item: 'Security considerations documented', completed: true },
+    { item: 'Scalability plan approved', completed: false },
+  ],
+  artifacts: ['architecture-diagram.png', 'api-spec.yaml', 'database-schema.sql'],
+  agentRecommendation: 'The Architect recommends approval. All critical components have been designed with scalability in mind. One minor item (scalability plan documentation) is pending but non-blocking.',
+};
+
+// GitHub Icon SVG Component
+const GitHubIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+  </svg>
+);
+
+// Fuzzy Llama Logo - matches the uploaded icon (white llama with bow tie on teal)
+const FuzzyLlamaLogo = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 100 100" fill="currentColor">
+    {/* Body - fluffy cloud-like shape */}
+    <ellipse cx="45" cy="65" rx="28" ry="25" />
+    {/* Neck */}
+    <ellipse cx="58" cy="45" rx="12" ry="20" />
+    {/* Head */}
+    <ellipse cx="62" cy="28" rx="14" ry="16" />
+    {/* Left ear */}
+    <ellipse cx="52" cy="14" rx="4" ry="10" />
+    {/* Right ear */}
+    <ellipse cx="72" cy="14" rx="4" ry="10" />
+    {/* Snout */}
+    <ellipse cx="72" cy="32" rx="8" ry="6" />
+    {/* Eye */}
+    <circle cx="65" cy="25" r="2" fill="#0d9488" />
+    {/* Fluffy chest detail */}
+    <ellipse cx="50" cy="55" rx="8" ry="10" opacity="0.3" />
+    {/* Bow tie */}
+    <path d="M 54 48 L 48 44 L 48 52 Z" fill="#0d9488" />
+    <path d="M 58 48 L 64 44 L 64 52 Z" fill="#0d9488" />
+    <circle cx="56" cy="48" r="3" fill="#0d9488" />
+    {/* Legs */}
+    <rect x="30" y="82" width="6" height="14" rx="3" />
+    <rect x="42" y="82" width="6" height="14" rx="3" />
+    <rect x="54" y="82" width="6" height="14" rx="3" />
+    <rect x="66" y="80" width="6" height="12" rx="3" />
+  </svg>
 );
 
 // Breathing orb indicator
 const BreathingOrb = ({ color, size = 'md' }: { color: string; size?: 'sm' | 'md' | 'lg' }) => {
-  const sizes = { sm: 'w-3 h-3', md: 'w-4 h-4', lg: 'w-6 h-6' };
+  const sizes = { sm: 'w-2 h-2', md: 'w-3 h-3', lg: 'w-4 h-4' };
   return (
     <motion.div
       className={`${sizes[size]} rounded-full ${color}`}
-      animate={{ scale: [1, 1.2, 1], opacity: [0.7, 1, 0.7] }}
-      transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+      animate={{ scale: [1, 1.3, 1], opacity: [0.6, 1, 0.6] }}
+      transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
     />
+  );
+};
+
+// Panel wrapper component with consistent styling
+const Panel = ({ children, className = '', theme }: { children: React.ReactNode; className?: string; theme?: ThemeMode }) => {
+  const isDark = theme === 'dark';
+  return (
+    <div className={`backdrop-blur-sm rounded-2xl border ${
+      isDark
+        ? 'bg-slate-800/60 border-slate-700/50'
+        : 'bg-teal-800/40 border-teal-700/30'
+    } ${className}`}>
+      {children}
+    </div>
+  );
+};
+
+// ============ GATE APPROVAL POPUP ============
+
+const GateApprovalPopup = ({
+  isOpen,
+  onClose,
+  onApprove,
+  onDeny,
+  gateData,
+  theme
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onApprove: () => void;
+  onDeny: () => void;
+  gateData: GateApprovalData;
+  theme: ThemeMode;
+}) => {
+  const [denyReason, setDenyReason] = useState('');
+  const [showDenyInput, setShowDenyInput] = useState(false);
+  const isDark = theme === 'dark';
+
+  if (!isOpen) return null;
+
+  const completedCount = gateData.checklist.filter(c => c.completed).length;
+  const totalCount = gateData.checklist.length;
+
+  const handleDeny = () => {
+    if (showDenyInput && denyReason.trim()) {
+      onDeny();
+      setShowDenyInput(false);
+      setDenyReason('');
+    } else {
+      setShowDenyInput(true);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+          onClick={(e) => e.stopPropagation()}
+          className={`w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden ${
+            isDark ? 'bg-slate-800 border border-slate-700' : 'bg-teal-900 border border-teal-700'
+          }`}
+        >
+          {/* Header */}
+          <div className={`p-4 border-b ${isDark ? 'border-slate-700 bg-slate-800/80' : 'border-teal-700 bg-teal-800/80'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center text-white font-bold">
+                  G{gateData.gateNumber}
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">{gateData.title}</h2>
+                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-teal-300'}`}>Gate {gateData.gateNumber} Approval Required</p>
+                </div>
+              </div>
+              <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+                <XMarkIcon className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
+            {/* Description */}
+            <p className={`text-sm leading-relaxed ${isDark ? 'text-slate-300' : 'text-teal-100'}`}>
+              {gateData.description}
+            </p>
+
+            {/* Checklist */}
+            <div className={`rounded-xl p-3 ${isDark ? 'bg-slate-700/50' : 'bg-teal-800/50'}`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-teal-300'}`}>
+                  Checklist
+                </span>
+                <span className="text-xs text-emerald-400 font-medium">
+                  {completedCount}/{totalCount} complete
+                </span>
+              </div>
+              <div className="space-y-2">
+                {gateData.checklist.map((item, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className={`w-4 h-4 rounded flex items-center justify-center ${
+                      item.completed ? 'bg-emerald-500' : isDark ? 'bg-slate-600' : 'bg-teal-700'
+                    }`}>
+                      {item.completed && <CheckIcon className="w-3 h-3 text-white" />}
+                    </div>
+                    <span className={`text-sm ${item.completed ? 'text-emerald-400' : isDark ? 'text-slate-300' : 'text-teal-200'}`}>
+                      {item.item}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Artifacts */}
+            <div className={`rounded-xl p-3 ${isDark ? 'bg-slate-700/50' : 'bg-teal-800/50'}`}>
+              <span className={`text-xs font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-teal-300'}`}>
+                Artifacts
+              </span>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {gateData.artifacts.map((artifact, i) => (
+                  <span key={i} className={`text-xs px-2 py-1 rounded-full ${
+                    isDark ? 'bg-slate-600 text-slate-300' : 'bg-teal-700 text-teal-200'
+                  }`}>
+                    {artifact}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Agent Recommendation */}
+            <div className={`rounded-xl p-3 border-l-4 border-teal-500 ${isDark ? 'bg-teal-500/10' : 'bg-teal-600/20'}`}>
+              <div className="flex items-start gap-2">
+                <span className="text-lg">🤖</span>
+                <div>
+                  <span className={`text-xs font-semibold ${isDark ? 'text-teal-400' : 'text-teal-300'}`}>Agent Recommendation</span>
+                  <p className={`text-sm mt-1 ${isDark ? 'text-slate-300' : 'text-teal-100'}`}>
+                    {gateData.agentRecommendation}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Deny reason input */}
+            {showDenyInput && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className={`rounded-xl p-3 ${isDark ? 'bg-red-500/10 border border-red-500/30' : 'bg-red-500/20 border border-red-400/30'}`}
+              >
+                <label className="text-xs font-semibold text-red-400 block mb-2">
+                  Reason for denial (will be sent to Agent Orchestrator)
+                </label>
+                <textarea
+                  value={denyReason}
+                  onChange={(e) => setDenyReason(e.target.value)}
+                  placeholder="Describe what needs to be addressed..."
+                  className={`w-full h-20 rounded-lg p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-500 ${
+                    isDark ? 'bg-slate-700 text-white placeholder-slate-400' : 'bg-teal-800 text-white placeholder-teal-400'
+                  }`}
+                />
+              </motion.div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className={`p-4 border-t ${isDark ? 'border-slate-700 bg-slate-800/50' : 'border-teal-700 bg-teal-800/50'}`}>
+            <div className="flex gap-3">
+              <button
+                onClick={handleDeny}
+                className={`flex-1 py-3 rounded-xl font-medium transition-colors ${
+                  showDenyInput && !denyReason.trim()
+                    ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                    : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                }`}
+                disabled={showDenyInput && !denyReason.trim()}
+              >
+                {showDenyInput ? 'Submit Denial' : 'Deny'}
+              </button>
+              <button
+                onClick={onApprove}
+                className="flex-1 py-3 rounded-xl font-medium bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
+              >
+                Approve Gate
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
+// ============ SPLASH PAGE FOR NEW USERS ============
+
+const SplashPage = ({ onGetStarted }: { onGetStarted: () => void }) => {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-teal-900 via-teal-800 to-slate-900 flex items-center justify-center p-8">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="max-w-4xl w-full text-center"
+      >
+        {/* Logo */}
+        <motion.div
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ type: 'spring', delay: 0.2 }}
+          className="w-32 h-32 mx-auto mb-8 bg-teal-600 rounded-3xl flex items-center justify-center shadow-xl shadow-teal-500/30"
+        >
+          <FuzzyLlamaLogo className="w-24 h-24 text-white" />
+        </motion.div>
+
+        <motion.h1
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="text-5xl font-bold text-white mb-4"
+        >
+          Welcome to Fuzzy Llama
+        </motion.h1>
+
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="text-xl text-teal-100/80 mb-12 max-w-2xl mx-auto"
+        >
+          Your AI-powered development companion. Build software with confidence using 14 specialized AI agents and a transparent, gated workflow.
+        </motion.p>
+
+        {/* Features Grid */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+          className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12"
+        >
+          {[
+            { icon: '🤖', title: '14 AI Agents', desc: 'Specialized agents for every phase of development' },
+            { icon: '🚦', title: '10 Quality Gates', desc: 'Transparent checkpoints ensure quality at every step' },
+            { icon: '👁️', title: 'Full Transparency', desc: 'See every decision, understand every choice' },
+          ].map((feature, i) => (
+            <motion.div
+              key={feature.title}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7 + i * 0.1 }}
+              className="bg-teal-800/50 backdrop-blur-sm rounded-2xl p-6 border border-teal-700/50"
+            >
+              <div className="text-4xl mb-4">{feature.icon}</div>
+              <h3 className="text-lg font-semibold text-white mb-2">{feature.title}</h3>
+              <p className="text-sm text-teal-200/70">{feature.desc}</p>
+            </motion.div>
+          ))}
+        </motion.div>
+
+        {/* CTA Button */}
+        <motion.button
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 1 }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onGetStarted}
+          className="px-8 py-4 bg-teal-500 hover:bg-teal-400 text-white font-semibold rounded-full text-lg shadow-lg shadow-teal-500/30 transition-colors"
+        >
+          Get Started
+        </motion.button>
+
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.1 }}
+          className="text-sm text-teal-300/50 mt-6"
+        >
+          No credit card required. Start building in minutes.
+        </motion.p>
+      </motion.div>
+    </div>
+  );
+};
+
+// ============ GITHUB POPUP ============
+
+const GitHubPopup = ({ isOpen, onClose, theme }: { isOpen: boolean; onClose: () => void; theme: ThemeMode }) => {
+  if (!isOpen) return null;
+  const isDark = theme === 'dark';
+
+  const actions = [
+    { label: 'Run Workflow', desc: 'Trigger a GitHub Action' },
+    { label: 'Sync Repository', desc: 'Pull latest changes' },
+    { label: 'View Actions', desc: 'See workflow history' },
+    { label: 'Deploy', desc: 'Deploy to production' },
+  ];
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/50 z-50 flex items-start justify-end p-4 pt-16"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: -10, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -10, scale: 0.95 }}
+          onClick={(e) => e.stopPropagation()}
+          className={`rounded-2xl shadow-xl border w-72 overflow-hidden ${
+            isDark ? 'bg-slate-800 border-slate-700' : 'bg-teal-900 border-teal-700'
+          }`}
+        >
+          <div className={`p-4 border-b flex items-center justify-between ${isDark ? 'border-slate-700' : 'border-teal-700'}`}>
+            <div className="flex items-center gap-2">
+              <GitHubIcon className="w-5 h-5 text-white" />
+              <span className="font-semibold text-white">GitHub Actions</span>
+            </div>
+            <button onClick={onClose} className="text-slate-400 hover:text-white">
+              <XMarkIcon className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-2">
+            {actions.map((action) => (
+              <button
+                key={action.label}
+                className={`w-full flex flex-col p-3 rounded-xl transition-colors text-left ${
+                  isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-800'
+                }`}
+              >
+                <span className="text-sm font-medium text-white">{action.label}</span>
+                <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-teal-300'}`}>{action.desc}</span>
+              </button>
+            ))}
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
+// ============ SETTINGS POPUP ============
+
+const SettingsPopup = ({ isOpen, onClose, theme, onToggleTheme }: {
+  isOpen: boolean;
+  onClose: () => void;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+}) => {
+  if (!isOpen) return null;
+  const isDark = theme === 'dark';
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/50 z-50 flex items-start justify-end p-4 pt-16"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: -10, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -10, scale: 0.95 }}
+          onClick={(e) => e.stopPropagation()}
+          className={`rounded-2xl shadow-xl border w-64 overflow-hidden ${
+            isDark ? 'bg-slate-800 border-slate-700' : 'bg-teal-900 border-teal-700'
+          }`}
+        >
+          <div className={`p-4 border-b flex items-center justify-between ${isDark ? 'border-slate-700' : 'border-teal-700'}`}>
+            <span className="font-semibold text-white">Settings</span>
+            <button onClick={onClose} className="text-slate-400 hover:text-white">
+              <XMarkIcon className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-2">
+            <button
+              onClick={onToggleTheme}
+              className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors ${
+                isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-800'
+              }`}
+            >
+              {isDark ? (
+                <SunIcon className="w-5 h-5 text-amber-400" />
+              ) : (
+                <MoonIcon className="w-5 h-5 text-teal-300" />
+              )}
+              <span className="text-sm text-white">
+                {isDark ? 'Light Mode' : 'Dark Mode'}
+              </span>
+            </button>
+            <button className={`w-full flex flex-col p-3 rounded-xl transition-colors text-left ${
+              isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-800'
+            }`}>
+              <span className="text-sm text-white">Profile</span>
+            </button>
+            <button className={`w-full flex flex-col p-3 rounded-xl transition-colors text-left ${
+              isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-800'
+            }`}>
+              <span className="text-sm text-white">Preferences</span>
+            </button>
+            <div className={`border-t my-2 ${isDark ? 'border-slate-700' : 'border-teal-700'}`} />
+            <button className={`w-full flex flex-col p-3 rounded-xl transition-colors text-left ${
+              isDark ? 'hover:bg-red-500/20' : 'hover:bg-red-500/20'
+            }`}>
+              <span className="text-sm text-red-400">Sign Out</span>
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 };
 
 // ============ LEFT PANEL COMPONENTS ============
 
-const ChatPanel = () => {
+const AgentOrchestratorPanel = ({ theme }: { theme: ThemeMode }) => {
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const isDark = theme === 'dark';
 
   const handleSend = () => {
     if (!input.trim()) return;
-
     const newMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
@@ -116,7 +681,7 @@ const ChatPanel = () => {
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'I understand! Let me help you with that. Give me a moment to think through the best approach...',
+        content: 'Acknowledged. Coordinating agents to handle your request.',
         timestamp: new Date(),
       }]);
       setIsStreaming(false);
@@ -124,378 +689,637 @@ const ChatPanel = () => {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Friendly Chat Header */}
-      <div className="flex items-center gap-3 p-4 bg-gradient-to-r from-primary-500/10 to-violet-500/10 rounded-t-3xl">
+    <Panel theme={theme} className="flex flex-col h-full">
+      {/* Header */}
+      <div className={`flex items-center gap-3 p-3 border-b ${isDark ? 'border-slate-700/50' : 'border-teal-700/30'}`}>
         <div className="relative">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-violet-500 flex items-center justify-center">
-            <SparklesIcon className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 rounded-xl bg-teal-500 flex items-center justify-center">
+            <CpuChipIcon className="w-5 h-5 text-white" />
           </div>
           <motion.div
-            className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-400 border-2 border-dark-surface"
+            className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-800"
             animate={{ scale: [1, 1.2, 1] }}
             transition={{ duration: 2, repeat: Infinity }}
           />
         </div>
-        <div>
-          <span className="font-semibold text-dark-text-primary">LayerCake Assistant</span>
-          <p className="text-xs text-dark-text-muted">Here to help you build</p>
+        <div className="flex-1">
+          <span className="font-semibold text-sm text-white">Agent Orchestrator</span>
+          <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-teal-300'}`}>Coordinating 14 AI agents</p>
+        </div>
+        <div className="flex items-center gap-1 bg-emerald-500/20 px-2 py-0.5 rounded-full">
+          <BreathingOrb color="bg-emerald-400" size="sm" />
+          <span className="text-[10px] text-emerald-400 font-medium">3 Active</span>
         </div>
       </div>
 
-      {/* Messages with organic bubbles */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
         {messages.map((msg, i) => (
           <motion.div
             key={msg.id}
-            initial={{ opacity: 0, y: 20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ delay: i * 0.1 }}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05 }}
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
-            <div className={`max-w-[85%] ${
+            <div className={`max-w-[90%] px-3 py-2 text-xs leading-relaxed rounded-2xl ${
               msg.role === 'user'
-                ? 'bg-gradient-to-br from-primary-500/30 to-primary-600/20 text-primary-50 rounded-3xl rounded-br-lg'
+                ? 'bg-teal-500 text-white rounded-br-md'
                 : msg.role === 'system'
-                ? 'bg-gradient-to-br from-violet-500/10 to-violet-600/5 text-dark-text-secondary rounded-3xl rounded-bl-lg italic'
-                : 'bg-gradient-to-br from-dark-elevated to-dark-surface text-dark-text-primary rounded-3xl rounded-bl-lg shadow-lg shadow-black/10'
-            } px-4 py-3 text-sm leading-relaxed`}>
+                ? `${isDark ? 'bg-slate-700/50' : 'bg-teal-700/50'} text-teal-200 rounded-bl-md italic`
+                : `${isDark ? 'bg-slate-700' : 'bg-teal-700/70'} text-white rounded-bl-md`
+            }`}>
               {msg.content}
             </div>
           </motion.div>
         ))}
-
         {isStreaming && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex items-center gap-3 px-4 py-3 bg-dark-elevated/50 rounded-3xl rounded-bl-lg max-w-[85%]"
-          >
-            <div className="flex gap-1.5">
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-2xl rounded-bl-md max-w-[90%] ${isDark ? 'bg-slate-700/50' : 'bg-teal-700/50'}`}>
+            <div className="flex gap-1">
               {[0, 1, 2].map((i) => (
                 <motion.span
                   key={i}
-                  className="w-2 h-2 bg-gradient-to-br from-primary-400 to-violet-400 rounded-full"
-                  animate={{ y: [0, -6, 0] }}
-                  transition={{ duration: 0.6, delay: i * 0.15, repeat: Infinity }}
+                  className="w-1.5 h-1.5 bg-teal-400 rounded-full"
+                  animate={{ y: [0, -4, 0] }}
+                  transition={{ duration: 0.5, delay: i * 0.1, repeat: Infinity }}
                 />
               ))}
             </div>
-            <span className="text-sm text-dark-text-muted">Thinking...</span>
-          </motion.div>
+            <span className="text-[10px] text-teal-300">Processing...</span>
+          </div>
         )}
       </div>
 
-      {/* Organic Input */}
-      <div className="p-4">
-        <div className="flex items-center gap-3 bg-dark-elevated/80 rounded-full px-4 py-2 border border-dark-border/20 focus-within:border-primary-500/30 transition-colors">
+      {/* Input */}
+      <div className={`p-3 border-t ${isDark ? 'border-slate-700/50' : 'border-teal-700/30'}`}>
+        <div className={`flex items-center gap-2 rounded-full px-3 py-1.5 ${isDark ? 'bg-slate-700/50' : 'bg-teal-700/50'}`}>
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask me anything..."
-            className="flex-1 bg-transparent text-sm text-dark-text-primary placeholder-dark-text-muted focus:outline-none"
+            placeholder="Command your agents..."
+            className="flex-1 bg-transparent text-xs text-white placeholder-teal-300/50 focus:outline-none"
           />
           {isStreaming ? (
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setIsStreaming(false)}
-              className="w-9 h-9 rounded-full bg-gradient-to-br from-red-500/20 to-red-600/30 text-red-400 flex items-center justify-center"
-            >
-              <StopIcon className="w-4 h-4" />
-            </motion.button>
+            <button onClick={() => setIsStreaming(false)} className="w-7 h-7 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center">
+              <StopIcon className="w-3 h-3" />
+            </button>
           ) : (
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={handleSend}
-              className="w-9 h-9 rounded-full bg-gradient-to-br from-primary-500 to-violet-500 text-white flex items-center justify-center shadow-lg shadow-primary-500/25"
-            >
-              <PaperAirplaneIcon className="w-4 h-4" />
-            </motion.button>
+            <button onClick={handleSend} className="w-7 h-7 rounded-full bg-teal-500 text-white flex items-center justify-center">
+              <PaperAirplaneIcon className="w-3 h-3" />
+            </button>
           )}
         </div>
       </div>
-    </div>
+    </Panel>
   );
 };
 
-const ActivityFeed = () => {
+const ActivityPanel = ({ theme }: { theme: ThemeMode }) => {
+  const isDark = theme === 'dark';
+
   const getEventStyle = (type: ActivityEvent['type']) => {
     switch (type) {
-      case 'agent_complete': return { icon: CheckCircleIcon, color: 'text-emerald-400', bg: 'bg-emerald-400/10' };
-      case 'gate_ready': return { icon: SparklesIcon, color: 'text-amber-400', bg: 'bg-amber-400/10' };
-      case 'task_complete': return { icon: CheckCircleIcon, color: 'text-primary-400', bg: 'bg-primary-400/10' };
-      default: return { icon: ClockIcon, color: 'text-dark-text-muted', bg: 'bg-dark-elevated' };
+      case 'agent_complete': return { icon: CheckCircleIcon, color: 'text-emerald-400', bg: 'bg-emerald-500/20' };
+      case 'agent_working': return { icon: BoltIcon, color: 'text-teal-400', bg: 'bg-teal-500/20' };
+      case 'agent_start': return { icon: SparklesIcon, color: 'text-blue-400', bg: 'bg-blue-500/20' };
+      case 'gate_ready': return { icon: FlagIcon, color: 'text-amber-400', bg: 'bg-amber-500/20' };
+      case 'task_complete': return { icon: CheckCircleIcon, color: 'text-teal-400', bg: 'bg-teal-500/20' };
+      default: return { icon: ClockIcon, color: 'text-slate-400', bg: 'bg-slate-500/20' };
     }
   };
 
+  const formatTime = (date: Date) => {
+    const diff = Date.now() - date.getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'now';
+    if (mins < 60) return `${mins}m`;
+    return `${Math.floor(mins / 60)}h`;
+  };
+
   return (
-    <div className="px-4 py-3">
-      <h3 className="text-xs font-medium text-dark-text-muted mb-3 flex items-center gap-2">
-        <HeartIcon className="w-4 h-4 text-pink-400" />
-        Recent Activity
-      </h3>
-      <div className="space-y-2">
+    <Panel theme={theme} className="flex flex-col h-full">
+      <div className={`flex items-center justify-between px-3 py-2 border-b ${isDark ? 'border-slate-700/50' : 'border-teal-700/30'}`}>
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider flex items-center gap-1.5 text-teal-300">
+          <HeartIcon className="w-3 h-3 text-pink-400" />
+          Recent Activity
+        </h3>
+        <span className="text-[9px] text-teal-400">{mockActivity.length}</span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
         {mockActivity.map((event, i) => {
           const style = getEventStyle(event.type);
           const Icon = style.icon;
           return (
             <motion.div
               key={event.id}
-              initial={{ opacity: 0, x: -10 }}
+              initial={{ opacity: 0, x: -5 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className={`flex items-center gap-3 p-2.5 rounded-2xl ${style.bg} backdrop-blur`}
+              transition={{ delay: i * 0.05 }}
+              className={`flex items-center gap-2 p-2 rounded-xl ${style.bg}`}
             >
-              <div className={`w-8 h-8 rounded-full ${style.bg} flex items-center justify-center`}>
-                <Icon className={`w-4 h-4 ${style.color}`} />
+              <div className={`w-5 h-5 rounded-lg ${style.bg} flex items-center justify-center`}>
+                <Icon className={`w-3 h-3 ${style.color}`} />
               </div>
-              <span className="text-xs text-dark-text-secondary flex-1">{event.message}</span>
+              <div className="flex-1 min-w-0">
+                <span className="text-[10px] text-teal-100 block truncate">{event.message}</span>
+              </div>
+              <span className="text-[9px] text-teal-400">{formatTime(event.timestamp)}</span>
             </motion.div>
           );
         })}
       </div>
-    </div>
+    </Panel>
   );
 };
 
-const TodoList = () => {
+const TasksPanel = ({ theme }: { theme: ThemeMode }) => {
   const [todos, setTodos] = useState(mockTodos);
+  const isDark = theme === 'dark';
 
   const toggleTodo = (id: string) => {
     setTodos(todos.map(t => t.id === id ? { ...t, done: !t.done } : t));
   };
 
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high': return 'bg-red-400';
+      case 'medium': return 'bg-amber-400';
+      case 'low': return 'bg-emerald-400';
+      default: return 'bg-slate-400';
+    }
+  };
+
   return (
-    <div className="px-4 py-3">
-      <h3 className="text-xs font-medium text-dark-text-muted mb-3">Your Tasks</h3>
-      <div className="space-y-2">
+    <Panel theme={theme} className="flex flex-col h-full">
+      <div className={`flex items-center justify-between px-3 py-2 border-b ${isDark ? 'border-slate-700/50' : 'border-teal-700/30'}`}>
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-teal-300">Your Tasks</h3>
+        <span className="text-[9px] text-emerald-400">{todos.filter(t => t.done).length}/{todos.length}</span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
         {todos.map((todo, i) => (
           <motion.label
             key={todo.id}
-            initial={{ opacity: 0, x: -10 }}
+            initial={{ opacity: 0, x: -5 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: i * 0.05 }}
-            className={`flex items-center gap-3 p-2.5 rounded-2xl cursor-pointer transition-all ${
-              todo.done ? 'bg-emerald-400/5' : 'bg-dark-elevated/50 hover:bg-dark-elevated'
+            transition={{ delay: i * 0.03 }}
+            className={`flex items-center gap-2 p-2 rounded-xl cursor-pointer transition-all ${
+              todo.done
+                ? 'bg-emerald-500/10'
+                : isDark ? 'bg-slate-700/30 hover:bg-slate-700/50' : 'bg-teal-700/30 hover:bg-teal-700/50'
             }`}
           >
-            <motion.div
-              whileTap={{ scale: 0.9 }}
-              className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
-                todo.done
-                  ? 'bg-emerald-400 border-emerald-400'
-                  : 'border-dark-border hover:border-primary-400'
-              }`}
+            <div
               onClick={() => toggleTodo(todo.id)}
+              className={`w-4 h-4 rounded-md border-2 flex items-center justify-center transition-colors ${
+                todo.done ? 'bg-emerald-500 border-emerald-500' : 'border-teal-500'
+              }`}
             >
-              {todo.done && <CheckCircleIcon className="w-4 h-4 text-white" />}
-            </motion.div>
-            <span className={`text-sm ${todo.done ? 'line-through text-dark-text-muted' : 'text-dark-text-secondary'}`}>
+              {todo.done && <CheckIcon className="w-3 h-3 text-white" />}
+            </div>
+            <span className={`text-[11px] flex-1 ${todo.done ? 'line-through text-teal-500' : 'text-teal-100'}`}>
               {todo.text}
             </span>
+            <div className={`w-1.5 h-1.5 rounded-full ${getPriorityColor(todo.priority)}`} />
           </motion.label>
         ))}
       </div>
-    </div>
+    </Panel>
   );
 };
 
 // ============ CENTER PANEL COMPONENTS ============
 
-const WorkspacePanel = ({ activeTab, onTabChange }: { activeTab: WorkspaceTab; onTabChange: (tab: WorkspaceTab) => void }) => {
-  const tabs: { id: WorkspaceTab; label: string; icon: React.ElementType; color: string }[] = [
-    { id: 'ui', label: 'Preview', icon: ComputerDesktopIcon, color: 'from-pink-400 to-rose-500' },
-    { id: 'docs', label: 'Docs', icon: DocumentTextIcon, color: 'from-blue-400 to-indigo-500' },
-    { id: 'code', label: 'Code', icon: CodeBracketIcon, color: 'from-emerald-400 to-teal-500' },
-    { id: 'map', label: 'Journey', icon: MapIcon, color: 'from-violet-400 to-purple-500' },
+const WorkspacePanel = ({ activeTab, onTabChange, theme }: { activeTab: WorkspaceTab; onTabChange: (tab: WorkspaceTab) => void; theme: ThemeMode }) => {
+  const isDark = theme === 'dark';
+  const tabs: { id: WorkspaceTab; label: string }[] = [
+    { id: 'ui', label: 'Preview' },
+    { id: 'docs', label: 'Docs' },
+    { id: 'code', label: 'Code' },
+    { id: 'map', label: 'Journey' },
   ];
 
   return (
-    <div className="flex flex-col h-full p-4">
-      {/* Pill Tab Bar */}
-      <div className="flex items-center gap-2 p-1.5 bg-dark-elevated/50 rounded-full mb-4 self-center">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <motion.button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium transition-all ${
-                activeTab === tab.id
-                  ? `bg-gradient-to-r ${tab.color} text-white shadow-lg`
-                  : 'text-dark-text-muted hover:text-dark-text-primary'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {tab.label}
-            </motion.button>
-          );
-        })}
-      </div>
+    <div className="flex flex-col h-full p-3">
+      <Panel theme={theme} className="flex-1 flex flex-col overflow-hidden">
+        {/* Tab Bar inside panel - smaller */}
+        <div className="flex justify-center pt-3 pb-2">
+          <div className={`flex items-center gap-0.5 p-0.5 rounded-full ${isDark ? 'bg-slate-800/60' : 'bg-teal-800/40'}`}>
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => onTabChange(tab.id)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                  activeTab === tab.id
+                    ? 'bg-teal-500 text-white shadow-md'
+                    : 'text-teal-300 hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      {/* Content Area with organic container */}
-      <motion.div
-        layout
-        className="flex-1 bg-gradient-to-br from-dark-elevated/80 to-dark-surface/60 rounded-[2rem] p-6 overflow-auto backdrop-blur border border-dark-border/10"
-      >
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-            className="h-full"
-          >
-            {activeTab === 'ui' && <UIPreviewContent />}
-            {activeTab === 'docs' && <DocsContent />}
-            {activeTab === 'code' && <CodeContent />}
-            {activeTab === 'map' && <JourneyContent />}
-          </motion.div>
-        </AnimatePresence>
-      </motion.div>
+        {/* Content Area */}
+        <div className="flex-1 p-4 overflow-auto">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="h-full"
+            >
+              {activeTab === 'ui' && <UIPreviewContent theme={theme} />}
+              {activeTab === 'docs' && <DocsContent theme={theme} />}
+              {activeTab === 'code' && <CodeContent theme={theme} />}
+              {activeTab === 'map' && <JourneyContent theme={theme} />}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </Panel>
     </div>
   );
 };
 
-const UIPreviewContent = () => (
-  <div className="h-full flex items-center justify-center">
-    <div className="text-center">
-      <motion.div
-        animate={{ y: [0, -10, 0] }}
-        transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-        className="w-24 h-24 mx-auto mb-6 rounded-3xl bg-gradient-to-br from-pink-400/20 to-rose-500/20 flex items-center justify-center"
-      >
-        <ComputerDesktopIcon className="w-12 h-12 text-pink-400" />
-      </motion.div>
-      <h3 className="text-xl font-semibold text-dark-text-primary mb-2">UI Preview</h3>
-      <p className="text-sm text-dark-text-muted max-w-md">
-        Your beautiful UI will appear here once Design (G4) is complete. Can't wait to show you!
-      </p>
-    </div>
-  </div>
-);
-
-const DocsContent = () => {
-  const docTypes = ['PRD', 'Architecture', 'Tech Stack', 'API Docs'];
-  const [selectedDoc, setSelectedDoc] = useState('PRD');
+const UIPreviewContent = ({ theme }: { theme: ThemeMode }) => {
+  const [selectedView, setSelectedView] = useState('dashboard');
+  const views = ['dashboard', 'login', 'settings', 'profile'];
+  const isDark = theme === 'dark';
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex gap-2 mb-4 flex-wrap">
-        {docTypes.map((doc) => (
-          <motion.button
-            key={doc}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setSelectedDoc(doc)}
-            className={`px-4 py-2 rounded-full text-xs font-medium transition-all ${
-              selectedDoc === doc
-                ? 'bg-gradient-to-r from-blue-400 to-indigo-500 text-white shadow-lg shadow-blue-500/25'
-                : 'bg-dark-elevated/80 text-dark-text-muted hover:text-dark-text-primary'
+      <div className="flex gap-2 mb-4">
+        {views.map((view) => (
+          <button
+            key={view}
+            onClick={() => setSelectedView(view)}
+            className={`px-4 py-2 rounded-full text-xs font-medium capitalize transition-all ${
+              selectedView === view
+                ? 'bg-teal-500 text-white'
+                : isDark ? 'bg-slate-700/50 text-teal-300 hover:text-white' : 'bg-teal-700/50 text-teal-200 hover:text-white'
             }`}
           >
-            {doc}
-          </motion.button>
+            {view}
+          </button>
         ))}
       </div>
-      <div className="flex-1 bg-dark-bg/50 rounded-2xl p-5 overflow-auto">
-        <h2 className="text-xl font-bold text-dark-text-primary mb-4">{selectedDoc}</h2>
-        <div className="prose prose-invert prose-sm max-w-none">
-          <p className="text-dark-text-secondary leading-relaxed">
-            Your {selectedDoc} document content will appear here. This supports rich markdown with version history and collaborative editing.
-          </p>
+      <div className={`flex-1 rounded-2xl overflow-hidden border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-teal-900/50 border-teal-700/50'}`}>
+        <div className={`flex items-center gap-2 px-4 py-2 border-b ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-teal-800/50 border-teal-700/50'}`}>
+          <div className="flex gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+            <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+          </div>
+          <div className={`flex-1 rounded-full px-3 py-1 text-[10px] text-center ${isDark ? 'bg-slate-900/50 text-slate-400' : 'bg-teal-900/50 text-teal-300'}`}>
+            localhost:3000/{selectedView}
+          </div>
+        </div>
+        <div className="h-full flex items-center justify-center p-8">
+          <div className="text-center">
+            <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-teal-500/20 flex items-center justify-center">
+              <ComputerDesktopIcon className="w-10 h-10 text-teal-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-white mb-2 capitalize">{selectedView} Preview</h3>
+            <p className="text-sm text-teal-300">Live UI preview appears here after G4.</p>
+          </div>
         </div>
       </div>
     </div>
   );
 };
 
-const CodeContent = () => (
-  <div className="h-full flex flex-col">
-    <div className="flex items-center gap-3 mb-4">
-      <span className="text-xs text-dark-text-muted">File:</span>
-      <span className="text-xs bg-emerald-400/10 text-emerald-400 px-3 py-1.5 rounded-full font-mono">
-        src/App.tsx
-      </span>
-    </div>
-    <div className="flex-1 bg-dark-bg/50 rounded-2xl p-5 overflow-auto font-mono text-sm">
-      <pre className="text-dark-text-secondary leading-relaxed">
-{`// Your generated code will appear here
-import React from 'react';
+const DocsContent = ({ theme }: { theme: ThemeMode }) => {
+  const isDark = theme === 'dark';
+  const docTypes = [
+    { id: 'prd', name: 'PRD', status: 'complete' },
+    { id: 'architecture', name: 'Architecture', status: 'complete' },
+    { id: 'tech-stack', name: 'Tech Stack', status: 'complete' },
+    { id: 'api', name: 'API Docs', status: 'in-progress' },
+    { id: 'design', name: 'Design System', status: 'pending' },
+    { id: 'testing', name: 'Test Plan', status: 'pending' },
+    { id: 'deployment', name: 'Deployment', status: 'pending' },
+  ];
+  const [selectedDoc, setSelectedDoc] = useState('prd');
 
-export const App: React.FC = () => {
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'complete': return <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">Done</span>;
+      case 'in-progress': return <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-teal-500/20 text-teal-400">WIP</span>;
+      default: return <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-500/20 text-slate-400">Pending</span>;
+    }
+  };
+
   return (
-    <div className="app">
-      <h1>Hello LayerCake</h1>
+    <div className="h-full flex gap-4">
+      <div className="w-48 space-y-1">
+        <div className="text-[10px] font-semibold uppercase tracking-wider px-2 mb-2 text-teal-400">Documents</div>
+        {docTypes.map((doc) => (
+          <button
+            key={doc.id}
+            onClick={() => setSelectedDoc(doc.id)}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left transition-all ${
+              selectedDoc === doc.id
+                ? 'bg-teal-500/20 border border-teal-500/30'
+                : isDark ? 'hover:bg-slate-700/50' : 'hover:bg-teal-700/50'
+            }`}
+          >
+            <span className={`text-xs flex-1 ${selectedDoc === doc.id ? 'text-white font-medium' : 'text-teal-200'}`}>
+              {doc.name}
+            </span>
+            {getStatusBadge(doc.status)}
+          </button>
+        ))}
+      </div>
+      <div className={`flex-1 rounded-2xl p-5 overflow-auto ${isDark ? 'bg-slate-900/50' : 'bg-teal-900/50'}`}>
+        <div className="flex items-center gap-3 mb-4">
+          <h2 className="text-xl font-bold text-white">{docTypes.find(d => d.id === selectedDoc)?.name}</h2>
+        </div>
+        <p className="text-sm leading-relaxed text-teal-200">
+          Document content for {docTypes.find(d => d.id === selectedDoc)?.name} will appear here.
+        </p>
+      </div>
     </div>
   );
-};`}
-      </pre>
-    </div>
-  </div>
-);
+};
 
-const JourneyContent = () => {
-  const milestones = [
-    { id: 1, title: 'Vision Defined', status: 'complete', gate: 'G1', emoji: '🎯' },
-    { id: 2, title: 'PRD Approved', status: 'complete', gate: 'G2', emoji: '📝' },
-    { id: 3, title: 'Architecture Ready', status: 'current', gate: 'G3', emoji: '🏗️' },
-    { id: 4, title: 'Design Complete', status: 'upcoming', gate: 'G4', emoji: '🎨' },
-    { id: 5, title: 'Development Done', status: 'upcoming', gate: 'G5', emoji: '💻' },
+const CodeContent = ({ theme }: { theme: ThemeMode }) => {
+  const isDark = theme === 'dark';
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['/docs', '/src']));
+  const [selectedFile, setSelectedFile] = useState<FileTreeNode | null>(null);
+
+  const toggleFolder = (path: string) => {
+    const newExpanded = new Set(expandedFolders);
+    if (newExpanded.has(path)) newExpanded.delete(path);
+    else newExpanded.add(path);
+    setExpandedFolders(newExpanded);
+  };
+
+  const renderTreeNode = (node: FileTreeNode, depth: number = 0) => {
+    const isExpanded = expandedFolders.has(node.path);
+    const isMarkdown = node.name.endsWith('.md');
+    const isSelected = selectedFile?.path === node.path;
+
+    return (
+      <div key={node.path}>
+        <button
+          onClick={() => {
+            if (node.type === 'folder') toggleFolder(node.path);
+            else if (isMarkdown) setSelectedFile(node);
+          }}
+          className={`w-full flex items-center gap-1.5 py-1 px-2 rounded-lg text-left transition-all ${
+            isSelected ? 'bg-teal-500/20 text-teal-300' : 'hover:bg-slate-700/30'
+          }`}
+          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+        >
+          {node.type === 'folder' ? (
+            <>
+              {isExpanded ? <ChevronDownIcon className="w-3 h-3 text-teal-400" /> : <ChevronRightIcon className="w-3 h-3 text-teal-400" />}
+              {isExpanded ? <FolderOpenIcon className="w-4 h-4 text-amber-400" /> : <FolderIcon className="w-4 h-4 text-amber-400" />}
+            </>
+          ) : (
+            <>
+              <span className="w-3" />
+              <DocumentIcon className={`w-4 h-4 ${isMarkdown ? 'text-blue-400' : 'text-teal-500'}`} />
+            </>
+          )}
+          <span className={`text-xs ${isSelected ? 'text-teal-300 font-medium' : isMarkdown ? 'text-teal-100' : 'text-teal-400'}`}>
+            {node.name}
+          </span>
+        </button>
+        {node.type === 'folder' && isExpanded && node.children && (
+          <div>{node.children.map(child => renderTreeNode(child, depth + 1))}</div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="h-full flex gap-4">
+      <div className={`w-56 rounded-2xl p-3 overflow-auto border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-teal-900/50 border-teal-700/50'}`}>
+        <div className={`flex items-center gap-2 px-2 py-1.5 mb-2 border-b ${isDark ? 'border-slate-700/50' : 'border-teal-700/50'}`}>
+          <CodeBracketIcon className="w-4 h-4 text-teal-400" />
+          <span className="text-xs font-semibold text-white">Files</span>
+        </div>
+        <div className="space-y-0.5">{mockFileTree.map(node => renderTreeNode(node))}</div>
+      </div>
+      <div className={`flex-1 rounded-2xl overflow-hidden border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-teal-900/50 border-teal-700/50'}`}>
+        {selectedFile ? (
+          <>
+            <div className={`flex items-center gap-2 px-4 py-2 border-b ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-teal-800/50 border-teal-700/50'}`}>
+              <DocumentIcon className="w-4 h-4 text-blue-400" />
+              <span className="text-xs font-mono text-white">{selectedFile.path}</span>
+            </div>
+            <div className="p-5 overflow-auto h-full">
+              <pre className="whitespace-pre-wrap text-sm leading-relaxed font-mono text-teal-200">
+                {selectedFile.content}
+              </pre>
+            </div>
+          </>
+        ) : (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center">
+              <DocumentIcon className="w-12 h-12 mx-auto mb-3 text-teal-600" />
+              <p className="text-sm text-teal-400">Select a .md file</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const JourneyContent = ({ theme }: { theme: ThemeMode }) => {
+  const isDark = theme === 'dark';
+  const milestones: JourneyMilestone[] = [
+    { id: '1', title: 'Vision Defined', description: 'You defined what you\'re building and why it matters.', status: 'completed', gate: 'G0-G1', insights: ['Clear problem statement', 'Target users identified'], celebration: '🎯 Vision Set!', achievements: ['PRD drafted', 'User stories complete'] },
+    { id: '2', title: 'Architecture Emerges', description: 'System skeleton took form with solid foundations.', status: 'completed', gate: 'G2-G3', insights: ['Scalable design chosen', 'Tech stack finalized'], celebration: '🏗️ Foundations!', achievements: ['System design approved', 'Database schema ready'] },
+    { id: '3', title: 'Design Takes Shape', description: 'Look and feel being crafted with care.', status: 'current', gate: 'G4', insights: ['User flows mapped'], achievements: ['Wireframes complete', 'Design system started'] },
+    { id: '4', title: 'Core Development', description: 'Building essential features that power your app.', status: 'upcoming', gate: 'G5-G6', insights: [] },
+    { id: '5', title: 'Quality Assured', description: 'Testing and validation for confidence.', status: 'upcoming', gate: 'G7', insights: [] },
+    { id: '6', title: 'Ready to Ship', description: 'Deployment preparation and launch!', status: 'upcoming', gate: 'G8-G9', insights: [] },
   ];
+
+  const completedCount = milestones.filter(m => m.status === 'completed').length;
+  const progress = Math.round((completedCount / milestones.length) * 100);
 
   return (
     <div className="h-full overflow-auto">
-      <h3 className="text-xl font-semibold text-dark-text-primary mb-6">Your Building Journey</h3>
-      <div className="space-y-4">
-        {milestones.map((milestone, i) => (
+      {/* Hero Header with gradient */}
+      <div className="text-center mb-6 relative">
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="inline-block"
+        >
+          <div className="text-4xl mb-2">🚀</div>
+          <h3 className="text-2xl font-bold bg-gradient-to-r from-teal-300 via-emerald-400 to-teal-300 bg-clip-text text-transparent mb-1">
+            Your Building Journey
+          </h3>
+          <p className="text-sm text-teal-400">Every great product is a story worth telling</p>
+        </motion.div>
+
+        {/* Progress indicator */}
+        <div className="mt-4 max-w-xs mx-auto">
+          <div className="flex justify-between text-[10px] text-teal-400 mb-1">
+            <span>Progress</span>
+            <span className="font-bold text-emerald-400">{progress}%</span>
+          </div>
+          <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/50' : 'bg-teal-800/50'}`}>
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              transition={{ duration: 1, ease: 'easeOut' }}
+              className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 rounded-full"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Journey Timeline */}
+      <div className="relative max-w-3xl mx-auto px-4">
+        {/* Animated gradient line */}
+        <div className="absolute left-1/2 top-0 bottom-0 w-1 transform -translate-x-1/2">
+          <div className="absolute inset-0 bg-gradient-to-b from-emerald-500 via-teal-500 to-slate-700 rounded-full" />
           <motion.div
-            key={milestone.id}
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: i * 0.1 }}
-            className={`flex items-center gap-4 p-4 rounded-2xl transition-all ${
-              milestone.status === 'complete'
-                ? 'bg-gradient-to-r from-emerald-400/10 to-emerald-500/5'
-                : milestone.status === 'current'
-                ? 'bg-gradient-to-r from-primary-400/20 to-violet-500/10 border border-primary-400/30'
-                : 'bg-dark-elevated/30 opacity-60'
-            }`}
-          >
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl ${
-              milestone.status === 'complete'
-                ? 'bg-emerald-400/20'
-                : milestone.status === 'current'
-                ? 'bg-primary-400/20'
-                : 'bg-dark-elevated'
-            }`}>
-              {milestone.status === 'complete' ? '✓' : milestone.emoji}
-            </div>
-            <div className="flex-1">
-              <h4 className={`font-semibold ${
-                milestone.status === 'complete' ? 'text-emerald-400' :
-                milestone.status === 'current' ? 'text-primary-400' :
-                'text-dark-text-muted'
-              }`}>
-                {milestone.title}
-              </h4>
-              <p className="text-xs text-dark-text-muted mt-0.5">
-                {milestone.gate} • {milestone.status === 'complete' ? 'Completed' :
-                 milestone.status === 'current' ? 'In Progress' : 'Coming up'}
-              </p>
-            </div>
-            {milestone.status === 'current' && (
-              <BreathingOrb color="bg-primary-400" size="sm" />
-            )}
-          </motion.div>
-        ))}
+            animate={{ y: [0, 20, 0] }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            className="absolute top-0 w-full h-20 bg-gradient-to-b from-white/30 to-transparent rounded-full"
+          />
+        </div>
+
+        {milestones.map((milestone, index) => {
+          const isLeft = index % 2 === 0;
+          const delay = index * 0.1;
+
+          return (
+            <motion.div
+              key={milestone.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay }}
+              className={`flex items-start gap-4 mb-6 ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}
+            >
+              {/* Card */}
+              <motion.div
+                whileHover={{ scale: milestone.status !== 'upcoming' ? 1.02 : 1 }}
+                className={`flex-1 max-w-[280px] ${isLeft ? 'text-right' : 'text-left'}`}
+              >
+                <div className={`p-4 rounded-2xl border backdrop-blur-sm transition-all ${
+                  milestone.status === 'completed'
+                    ? 'bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border-emerald-500/40 shadow-lg shadow-emerald-500/10'
+                    : milestone.status === 'current'
+                    ? 'bg-gradient-to-br from-teal-500/30 to-cyan-500/20 border-teal-400/50 shadow-lg shadow-teal-500/20 ring-1 ring-teal-400/30'
+                    : isDark ? 'bg-slate-800/30 border-slate-700/30 opacity-50' : 'bg-teal-900/30 border-teal-700/30 opacity-50'
+                }`}>
+                  {/* Celebration badge */}
+                  {milestone.celebration && milestone.status === 'completed' && (
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className={`flex items-center gap-1 mb-2 ${isLeft ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-gradient-to-r from-emerald-500/30 to-teal-500/30 text-emerald-300 font-medium border border-emerald-500/30">
+                        {milestone.celebration}
+                      </span>
+                    </motion.div>
+                  )}
+
+                  {/* Current indicator */}
+                  {milestone.status === 'current' && (
+                    <div className={`flex items-center gap-1 mb-2 ${isLeft ? 'justify-end' : 'justify-start'}`}>
+                      <motion.span
+                        animate={{ opacity: [1, 0.5, 1] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                        className="text-xs px-2 py-0.5 rounded-full bg-teal-500/30 text-teal-300 font-medium"
+                      >
+                        ✨ In Progress
+                      </motion.span>
+                    </div>
+                  )}
+
+                  <div className={`text-[10px] font-medium mb-1 ${
+                    milestone.status === 'completed' ? 'text-emerald-500' :
+                    milestone.status === 'current' ? 'text-teal-400' : 'text-teal-600'
+                  }`}>
+                    {milestone.gate}
+                  </div>
+
+                  <h4 className={`font-bold text-sm ${
+                    milestone.status === 'completed' ? 'text-emerald-300' :
+                    milestone.status === 'current' ? 'text-white' : 'text-teal-500'
+                  }`}>
+                    {milestone.title}
+                  </h4>
+
+                  <p className={`text-xs mt-1 ${
+                    milestone.status === 'upcoming' ? 'text-teal-600' : 'text-teal-300/80'
+                  }`}>
+                    {milestone.description}
+                  </p>
+
+                  {/* Achievements */}
+                  {milestone.achievements && milestone.achievements.length > 0 && milestone.status !== 'upcoming' && (
+                    <div className={`mt-2 pt-2 border-t ${isDark ? 'border-slate-700/30' : 'border-teal-700/30'}`}>
+                      <div className={`flex flex-wrap gap-1 ${isLeft ? 'justify-end' : 'justify-start'}`}>
+                        {milestone.achievements.map((achievement, i) => (
+                          <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300">
+                            {achievement}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+
+              {/* Center node */}
+              <div className="relative flex flex-col items-center">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: delay + 0.1, type: 'spring' }}
+                  className={`w-12 h-12 rounded-full flex items-center justify-center z-10 border-4 ${
+                    milestone.status === 'completed'
+                      ? 'bg-gradient-to-br from-emerald-400 to-emerald-600 border-emerald-300/50 shadow-lg shadow-emerald-500/30'
+                      : milestone.status === 'current'
+                      ? 'bg-gradient-to-br from-teal-400 to-cyan-500 border-teal-300/50 shadow-lg shadow-teal-500/30'
+                      : 'bg-slate-700 border-slate-600'
+                  }`}
+                >
+                  {milestone.status === 'completed' ? (
+                    <CheckIcon className="w-6 h-6 text-white" />
+                  ) : milestone.status === 'current' ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+                    >
+                      <SparklesIcon className="w-6 h-6 text-white" />
+                    </motion.div>
+                  ) : (
+                    <FlagIcon className="w-5 h-5 text-teal-500" />
+                  )}
+                </motion.div>
+              </div>
+
+              {/* Spacer */}
+              <div className="flex-1 max-w-[280px]" />
+            </motion.div>
+          );
+        })}
+
+        {/* End celebration */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.6 }}
+          className="text-center py-6"
+        >
+          <div className="text-3xl mb-2">🎉</div>
+          <p className="text-sm text-teal-400">Launch awaits at the finish line!</p>
+        </motion.div>
       </div>
     </div>
   );
@@ -503,170 +1327,275 @@ const JourneyContent = () => {
 
 // ============ RIGHT PANEL COMPONENTS ============
 
-const PhaseIndicator = ({ currentGate }: { currentGate: number }) => {
-  const getPhase = (gate: number): Phase => {
-    if (gate <= 3) return 'plan';
-    if (gate <= 6) return 'dev';
-    return 'ship';
+// Phase Detail Popup - shows when clicking Plan/Build/Ship buttons
+const PhaseDetailPopup = ({
+  isOpen,
+  onClose,
+  selectedPhase,
+  currentGate,
+  theme,
+  onGateClick
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  selectedPhase: Phase;
+  currentGate: number;
+  theme: ThemeMode;
+  onGateClick: (gate: number) => void;
+}) => {
+  const isDark = theme === 'dark';
+  const phaseAgents = ALL_AGENTS.filter(a => a.phase === selectedPhase);
+  const phaseGates = GATES_BY_PHASE[selectedPhase];
+  const costs = PHASE_COSTS[selectedPhase];
+
+  const phaseLabels: Record<Phase, string> = {
+    plan: 'Plan Phase',
+    dev: 'Build Phase',
+    ship: 'Ship Phase'
   };
 
-  const phase = getPhase(currentGate);
-  const phases: { id: Phase; label: string; emoji: string; color: string }[] = [
-    { id: 'plan', label: 'Plan', emoji: '🧠', color: 'from-violet-400 to-purple-500' },
-    { id: 'dev', label: 'Build', emoji: '⚡', color: 'from-primary-400 to-teal-500' },
-    { id: 'ship', label: 'Ship', emoji: '🚀', color: 'from-amber-400 to-orange-500' },
-  ];
+  if (!isOpen) return null;
 
   return (
-    <div className="p-4">
-      <h3 className="text-xs font-medium text-dark-text-muted mb-4">Current Phase</h3>
-      <div className="flex gap-2">
-        {phases.map((p, i) => (
-          <motion.div
-            key={p.id}
-            whileHover={{ scale: 1.05 }}
-            className={`flex-1 text-center py-3 rounded-2xl transition-all ${
-              phase === p.id
-                ? `bg-gradient-to-br ${p.color} shadow-lg`
-                : 'bg-dark-elevated/50'
-            }`}
-          >
-            <div className="text-lg mb-1">{p.emoji}</div>
-            <div className={`text-xs font-medium ${phase === p.id ? 'text-white' : 'text-dark-text-muted'}`}>
-              {p.label}
-            </div>
-          </motion.div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const ActiveAgents = () => {
-  const agents = [
-    { name: 'Architect', status: 'working', emoji: '🏗️' },
-    { name: 'Frontend', status: 'idle', emoji: '🎨' },
-  ];
-  const activeCount = agents.filter(a => a.status === 'working').length;
-
-  return (
-    <div className="px-4 py-3">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-medium text-dark-text-muted">Your Team</h3>
-        <span className="text-xs bg-gradient-to-r from-primary-400 to-violet-400 text-white px-2.5 py-1 rounded-full">
-          {activeCount} active
-        </span>
-      </div>
-      <div className="space-y-2">
-        {agents.map((agent, i) => (
-          <motion.div
-            key={agent.name}
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: i * 0.1 }}
-            className={`flex items-center gap-3 p-3 rounded-2xl ${
-              agent.status === 'working' ? 'bg-primary-400/10' : 'bg-dark-elevated/30'
-            }`}
-          >
-            <span className="text-lg">{agent.emoji}</span>
-            <span className="text-sm text-dark-text-secondary flex-1">{agent.name}</span>
-            {agent.status === 'working' && (
-              <BreathingOrb color="bg-primary-400" size="sm" />
-            )}
-          </motion.div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const GateProgress = ({ currentGate }: { currentGate: number }) => {
-  const gates = Array.from({ length: 10 }, (_, i) => i);
-
-  return (
-    <div className="px-4 py-3">
-      <h3 className="text-xs font-medium text-dark-text-muted mb-3">Gate Progress</h3>
-      <div className="flex flex-wrap gap-2">
-        {gates.map((i) => (
-          <motion.div
-            key={i}
-            whileHover={{ scale: 1.1 }}
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-              i < currentGate
-                ? 'bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-lg shadow-emerald-400/30'
-                : i === currentGate
-                ? 'bg-gradient-to-br from-primary-400 to-violet-500 text-white shadow-lg shadow-primary-400/30 ring-4 ring-primary-400/20'
-                : 'bg-dark-elevated/50 text-dark-text-muted'
-            }`}
-          >
-            {i < currentGate ? '✓' : i}
-          </motion.div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const CostMetrics = () => {
-  return (
-    <div className="px-4 py-3">
-      <div className="flex items-center gap-2 mb-3">
-        <BanknotesIcon className="w-4 h-4 text-emerald-400" />
-        <h3 className="text-xs font-medium text-dark-text-muted">Token Costs</h3>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-gradient-to-br from-primary-400/10 to-primary-500/5 rounded-2xl p-3 text-center">
-          <div className="text-xl font-bold text-primary-400">$0.45</div>
-          <div className="text-xs text-dark-text-muted mt-1">This Gate</div>
-        </div>
-        <div className="bg-gradient-to-br from-emerald-400/10 to-emerald-500/5 rounded-2xl p-3 text-center">
-          <div className="text-xl font-bold text-emerald-400">$2.30</div>
-          <div className="text-xs text-dark-text-muted mt-1">Total</div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const TeachingMoments = ({ skillLevel }: { skillLevel: SkillLevel }) => {
-  const tips = {
-    beginner: {
-      title: 'What\'s a Gate?',
-      content: 'Think of gates as friendly checkpoints. Each one makes sure your project is on the right track before moving forward!',
-      emoji: '💡',
-      color: 'from-amber-400/20 to-orange-400/10',
-    },
-    intermediate: {
-      title: 'Pro Tip',
-      content: 'Architecture decisions are locked after G3. Take your time reviewing them—they shape your entire system!',
-      emoji: '⚡',
-      color: 'from-primary-400/20 to-violet-400/10',
-    },
-    expert: {
-      title: 'Deep Dive',
-      content: 'Consider adding custom validation rules to your OpenAPI spec for stronger type safety across your stack.',
-      emoji: '🔬',
-      color: 'from-violet-400/20 to-purple-400/10',
-    },
-  };
-
-  const tip = tips[skillLevel];
-
-  return (
-    <div className="px-4 py-3">
+    <AnimatePresence>
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={`bg-gradient-to-br ${tip.color} rounded-2xl p-4 border border-dark-border/10`}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        onClick={onClose}
       >
-        <div className="flex items-start gap-3">
-          <span className="text-2xl">{tip.emoji}</span>
-          <div>
-            <h4 className="text-sm font-semibold text-dark-text-primary mb-1">{tip.title}</h4>
-            <p className="text-xs text-dark-text-secondary leading-relaxed">{tip.content}</p>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.9, opacity: 0 }}
+          onClick={(e) => e.stopPropagation()}
+          className={`relative w-full max-w-md rounded-3xl border p-6 ${
+            isDark ? 'bg-slate-900 border-slate-700' : 'bg-teal-900 border-teal-700'
+          }`}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-white">{phaseLabels[selectedPhase]}</h2>
+            <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-700/50">
+              <XMarkIcon className="w-5 h-5 text-teal-400" />
+            </button>
           </div>
-        </div>
+
+          {/* Team Section */}
+          <div className="mb-5">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">Team</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {phaseAgents.map((agent) => (
+                <div
+                  key={agent.type}
+                  className={`flex items-center gap-2 p-2 rounded-xl ${
+                    agent.status === 'working' ? 'bg-teal-500/20 border border-teal-500/30' : 'bg-slate-700/30'
+                  }`}
+                >
+                  <span className="text-sm">{agent.icon}</span>
+                  <span className="text-[10px] text-white flex-1 truncate">{agent.name}</span>
+                  {agent.status === 'working' && <BreathingOrb color="bg-teal-400" size="sm" />}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Gates Section */}
+          <div className="mb-5">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">Gates</h3>
+            <div className="flex gap-2">
+              {phaseGates.map((gateNum) => {
+                const isCompleted = gateNum < currentGate;
+                const isCurrent = gateNum === currentGate;
+                return (
+                  <button
+                    key={gateNum}
+                    onClick={() => isCurrent && onGateClick(gateNum)}
+                    className={`flex-1 py-3 rounded-xl flex items-center justify-center text-sm font-bold transition-all ${
+                      isCompleted ? 'bg-emerald-500 text-white shadow-md' :
+                      isCurrent ? 'bg-amber-500 text-white shadow-md cursor-pointer hover:bg-amber-400' :
+                      'bg-slate-700/40 text-teal-500'
+                    }`}
+                  >
+                    G{gateNum}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Costs Section */}
+          <div>
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">Token Costs</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl p-3 text-center bg-teal-500/10">
+                <div className="text-lg font-bold text-teal-300">{costs.current}</div>
+                <div className="text-[9px] text-teal-500">Current Gate</div>
+              </div>
+              <div className="rounded-xl p-3 text-center bg-emerald-500/10">
+                <div className="text-lg font-bold text-emerald-400">{costs.total}</div>
+                <div className="text-[9px] text-teal-500">Phase Total</div>
+              </div>
+            </div>
+          </div>
+        </motion.div>
       </motion.div>
+    </AnimatePresence>
+  );
+};
+
+const PhaseIndicator = ({ currentPhase, onPhaseClick, theme }: { currentPhase: Phase; onPhaseClick: (phase: Phase) => void; theme: ThemeMode }) => {
+  const phases: { id: Phase; label: string }[] = [
+    { id: 'plan', label: 'Plan' },
+    { id: 'dev', label: 'Build' },
+    { id: 'ship', label: 'Ship' },
+  ];
+
+  return (
+    <Panel theme={theme} className="p-3">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 px-1 text-teal-400">Current Phase</h3>
+      <div className="flex gap-1.5">
+        {phases.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => onPhaseClick(p.id)}
+            className={`flex-1 text-center py-2.5 px-2 rounded-xl transition-all cursor-pointer ${
+              currentPhase === p.id ? 'bg-teal-500 shadow-md hover:bg-teal-400' : 'bg-slate-700/30 hover:bg-slate-700/50'
+            }`}
+          >
+            <div className={`text-xs font-medium ${currentPhase === p.id ? 'text-white' : 'text-teal-400'}`}>{p.label}</div>
+          </button>
+        ))}
+      </div>
+      <p className="text-[9px] text-teal-500 mt-2 text-center">Click phase for details</p>
+    </Panel>
+  );
+};
+
+const ActiveAgentsPanel = ({ phase, theme: _theme }: { phase: Phase; theme: ThemeMode }) => {
+  const phaseAgents = ALL_AGENTS.filter(a => a.phase === phase);
+  const activeCount = phaseAgents.filter(a => a.status === 'working').length;
+
+  return (
+    <div className="px-3 py-2">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-teal-400">
+          Your Team
+        </h3>
+        <span className="text-[9px] bg-teal-500 text-white px-2 py-0.5 rounded-full">{activeCount} active</span>
+      </div>
+      <div className="space-y-1">
+        {phaseAgents.filter(a => a.status === 'working').map((agent) => (
+          <div key={agent.type} className="flex items-center gap-2 p-1.5 rounded-lg bg-teal-500/10">
+            <span className="text-sm">{agent.icon}</span>
+            <span className="text-[10px] text-white flex-1 truncate">{agent.name}</span>
+            <BreathingOrb color="bg-teal-400" size="sm" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const GateProgressPanel = ({ currentGate, currentPhase, theme, onGateClick }: { currentGate: number; currentPhase: Phase; theme: ThemeMode; onGateClick: (gate: number) => void }) => {
+  const phaseGates = GATES_BY_PHASE[currentPhase];
+
+  return (
+    <div className="px-3 py-2">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">
+        Gate Progress
+      </h3>
+      <div className="flex gap-1.5">
+        {phaseGates.map((gateNum) => {
+          const isCompleted = gateNum < currentGate;
+          const isCurrent = gateNum === currentGate;
+          return (
+            <button
+              key={gateNum}
+              onClick={() => isCurrent && onGateClick(gateNum)}
+              className={`flex-1 aspect-square rounded-xl flex items-center justify-center text-xs font-bold transition-all ${
+                isCompleted ? 'bg-emerald-500 text-white shadow-md' :
+                isCurrent ? 'bg-amber-500 text-white shadow-md ring-2 ring-amber-400/30 cursor-pointer hover:bg-amber-400' :
+                'bg-slate-700/40 text-teal-500'
+              }`}
+            >
+              G{gateNum}
+            </button>
+          );
+        })}
+      </div>
+      {phaseGates.includes(currentGate) && (
+        <p className="text-[9px] text-amber-400 mt-2 text-center">
+          Click G{currentGate} to review
+        </p>
+      )}
+    </div>
+  );
+};
+
+const CostMetrics = ({ phase, theme: _theme }: { phase: Phase; theme: ThemeMode }) => {
+  const costs = PHASE_COSTS[phase];
+  return (
+    <div className="px-3 py-2">
+      <div className="flex items-center gap-1.5 mb-2">
+        <BanknotesIcon className="w-3 h-3 text-emerald-400" />
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-teal-400">Token Costs</h3>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-xl p-2 text-center bg-teal-500/10">
+          <div className="text-lg font-bold text-teal-300">{costs.current}</div>
+          <div className="text-[9px] text-teal-500">This Gate</div>
+        </div>
+        <div className="rounded-xl p-2 text-center bg-emerald-500/10">
+          <div className="text-lg font-bold text-emerald-400">{costs.total}</div>
+          <div className="text-[9px] text-teal-500">Phase Total</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============ PROJECTS VIEW ============
+
+const ProjectsView = ({ theme, onSelectProject }: { theme: ThemeMode; onSelectProject: (name: string) => void }) => {
+  const projects = [
+    { id: '1', name: 'E-Commerce Platform', status: 'active', gate: 4, progress: 40 },
+    { id: '2', name: 'Mobile App Backend', status: 'active', gate: 2, progress: 20 },
+    { id: '3', name: 'Analytics Dashboard', status: 'completed', gate: 9, progress: 100 },
+  ];
+
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold text-white">Projects</h2>
+        <button className="px-4 py-2 bg-teal-500 text-white rounded-full text-sm font-medium hover:bg-teal-400 transition-colors">
+          + New Project
+        </button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {projects.map((project) => (
+          <Panel
+            key={project.id}
+            theme={theme}
+            className="p-4 cursor-pointer hover:border-teal-500/50 transition-colors"
+          >
+            <div onClick={() => onSelectProject(project.name)}>
+              <h3 className="font-semibold text-white mb-2">{project.name}</h3>
+              <div className="flex items-center gap-2 mb-3">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${project.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-teal-500/20 text-teal-300'}`}>
+                  {project.status === 'completed' ? 'Completed' : `Gate ${project.gate}`}
+                </span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden bg-slate-700/50">
+                <div className="h-full bg-teal-500 rounded-full" style={{ width: `${project.progress}%` }} />
+              </div>
+              <div className="text-xs mt-2 text-teal-400">{project.progress}% complete</div>
+            </div>
+          </Panel>
+        ))}
+      </div>
     </div>
   );
 };
@@ -674,106 +1603,190 @@ const TeachingMoments = ({ skillLevel }: { skillLevel: SkillLevel }) => {
 // ============ MAIN DASHBOARD ============
 
 export default function UnifiedDashboard() {
+  const [showSplash, setShowSplash] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('docs');
-  const [skillLevel] = useState<SkillLevel>('intermediate');
+  const [mainView, setMainView] = useState<MainView>('dashboard');
+  const [theme, setTheme] = useState<ThemeMode>('dark');
+  const [showGitHub, setShowGitHub] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showGateApproval, setShowGateApproval] = useState(false);
+  const [showPhaseDetail, setShowPhaseDetail] = useState(false);
+  const [selectedPhase, setSelectedPhase] = useState<Phase>('plan');
+  const [currentProjectName, setCurrentProjectName] = useState('E-Commerce Platform');
   const currentGate = 3;
+
+  const getPhase = (gate: number): Phase => {
+    if (gate <= 3) return 'plan';
+    if (gate <= 6) return 'dev';
+    return 'ship';
+  };
+
+  const currentPhase = getPhase(currentGate);
+  const isDark = theme === 'dark';
 
   const { data: projects } = useQuery({
     queryKey: ['projects'],
     queryFn: () => projectsApi.list(),
   });
 
-  const currentProject = projects?.[0];
+  if (showSplash) {
+    return <SplashPage onGetStarted={() => setShowSplash(false)} />;
+  }
+
+  const handleGateApprove = () => {
+    setShowGateApproval(false);
+    // Handle approval logic
+  };
+
+  const handleGateDeny = () => {
+    setShowGateApproval(false);
+    // Handle denial - would send message to orchestrator
+  };
+
+  const handleSelectProject = (name: string) => {
+    setCurrentProjectName(name);
+    setMainView('dashboard');
+  };
 
   return (
-    <div className="h-screen bg-gradient-to-br from-dark-bg via-dark-bg to-dark-surface text-dark-text-primary flex flex-col overflow-hidden">
-      {/* Ambient Background */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-primary-500/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-violet-500/5 rounded-full blur-3xl" />
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="absolute" style={{ left: `${10 + i * 12}%`, bottom: '10%' }}>
-            <FloatingParticle delay={i * 0.5} />
-          </div>
-        ))}
-      </div>
+    <div className={`h-screen flex flex-col overflow-hidden ${
+      isDark
+        ? 'bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800'
+        : 'bg-gradient-to-br from-teal-900 via-teal-800 to-slate-900'
+    } text-white`}>
+      {/* Popups */}
+      <GitHubPopup isOpen={showGitHub} onClose={() => setShowGitHub(false)} theme={theme} />
+      <SettingsPopup isOpen={showSettings} onClose={() => setShowSettings(false)} theme={theme} onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} />
+      <GateApprovalPopup
+        isOpen={showGateApproval}
+        onClose={() => setShowGateApproval(false)}
+        onApprove={handleGateApprove}
+        onDeny={handleGateDeny}
+        gateData={mockGateApproval}
+        theme={theme}
+      />
+      <PhaseDetailPopup
+        isOpen={showPhaseDetail}
+        onClose={() => setShowPhaseDetail(false)}
+        selectedPhase={selectedPhase}
+        currentGate={currentGate}
+        theme={theme}
+        onGateClick={() => {
+          setShowPhaseDetail(false);
+          setShowGateApproval(true);
+        }}
+      />
 
-      {/* Friendly Header */}
-      <header className="relative h-16 border-b border-dark-border/20 bg-dark-surface/60 backdrop-blur-xl flex items-center px-6 gap-4 z-10">
-        <div className="flex items-center gap-3">
-          <motion.div
-            whileHover={{ rotate: 10 }}
-            className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary-400 to-violet-500 flex items-center justify-center shadow-lg shadow-primary-500/25"
-          >
-            <SparklesIcon className="w-5 h-5 text-white" />
-          </motion.div>
-          <div>
-            <span className="font-bold text-lg">LayerCake</span>
-            <span className="text-dark-text-muted text-xs ml-2">Building magic</span>
+      {/* Header */}
+      <header className={`relative h-14 border-b flex items-center px-4 gap-3 z-10 ${
+        isDark ? 'border-slate-700/50 bg-slate-900/80' : 'border-teal-700/50 bg-teal-900/80'
+      } backdrop-blur-xl`}>
+        {/* Logo */}
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-xl bg-teal-500 flex items-center justify-center">
+            <FuzzyLlamaLogo className="w-6 h-6 text-white" />
           </div>
+          <span className="font-bold text-sm text-white">Fuzzy Llama</span>
         </div>
 
-        {/* Project Selector */}
-        <select className="ml-4 bg-dark-elevated/80 border border-dark-border/30 rounded-full px-4 py-2 text-sm text-dark-text-primary focus:outline-none focus:border-primary-400/50">
-          <option>{currentProject?.name || 'Select Project'}</option>
-        </select>
+        {/* Main Navigation - no icons */}
+        <div className={`flex items-center gap-1 p-1 rounded-full ml-4 ${isDark ? 'bg-slate-800/50' : 'bg-teal-800/50'}`}>
+          <button
+            onClick={() => setMainView('dashboard')}
+            className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+              mainView === 'dashboard' ? 'bg-teal-500 text-white' : 'text-teal-300 hover:text-white'
+            }`}
+          >
+            Dashboard
+          </button>
+          <button
+            onClick={() => setMainView('projects')}
+            className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+              mainView === 'projects' ? 'bg-teal-500 text-white' : 'text-teal-300 hover:text-white'
+            }`}
+          >
+            Projects
+          </button>
+        </div>
+
+        {/* Current Project Name - just text, no dropdown */}
+        {mainView === 'dashboard' && (
+          <span className="text-sm text-teal-300 ml-2">
+            {currentProjectName}
+          </span>
+        )}
 
         <div className="flex-1" />
 
-        {/* Skill Level Pill */}
-        <div className="flex items-center gap-2 bg-violet-400/10 px-4 py-2 rounded-full">
-          <AcademicCapIcon className="w-4 h-4 text-violet-400" />
-          <span className="text-xs text-violet-400 font-medium capitalize">{skillLevel}</span>
-        </div>
-
-        {/* Notification */}
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="relative w-10 h-10 rounded-full bg-dark-elevated/80 flex items-center justify-center"
+        {/* GitHub Button - no icon inside, just the github mark */}
+        <button
+          onClick={() => setShowGitHub(true)}
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+            isDark ? 'bg-slate-700/50 hover:bg-slate-700 text-white' : 'bg-teal-700/50 hover:bg-teal-700 text-white'
+          }`}
         >
-          <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full" />
-          <ExclamationTriangleIcon className="w-5 h-5 text-dark-text-muted" />
-        </motion.button>
+          <GitHubIcon className="w-4 h-4" />
+        </button>
+
+        {/* Profile Avatar */}
+        <button
+          onClick={() => setShowSettings(true)}
+          className="w-8 h-8 rounded-full bg-teal-500 flex items-center justify-center text-xs font-bold text-white"
+        >
+          JD
+        </button>
       </header>
 
-      {/* Main Content - 3 Panel Layout */}
-      <div className="flex-1 flex overflow-hidden relative z-10">
-        {/* Left Panel - Chat */}
-        <div className="w-[320px] min-w-[280px] border-r border-dark-border/20 bg-dark-surface/40 backdrop-blur-xl flex flex-col">
-          <div className="flex-1 overflow-hidden">
-            <ChatPanel />
-          </div>
-          <div className="border-t border-dark-border/20">
-            <ActivityFeed />
-          </div>
-          <div className="border-t border-dark-border/20">
-            <TodoList />
-          </div>
+      {/* Main Content */}
+      {mainView === 'projects' ? (
+        <div className="flex-1 overflow-auto">
+          <ProjectsView theme={theme} onSelectProject={handleSelectProject} />
         </div>
+      ) : (
+        <div className="flex-1 flex overflow-hidden relative z-10">
+          {/* Left Panel */}
+          <div className={`w-[300px] min-w-[280px] p-3 flex flex-col gap-3 ${isDark ? 'bg-slate-900/30' : 'bg-teal-900/30'}`}>
+            <div className="flex-[3] min-h-0">
+              <AgentOrchestratorPanel theme={theme} />
+            </div>
+            <div className="flex-1 min-h-[120px]">
+              <ActivityPanel theme={theme} />
+            </div>
+            <div className="flex-1 min-h-[120px]">
+              <TasksPanel theme={theme} />
+            </div>
+          </div>
 
-        {/* Center Panel - Workspace */}
-        <div className="flex-1 min-w-[400px]">
-          <WorkspacePanel activeTab={activeTab} onTabChange={setActiveTab} />
-        </div>
+          {/* Center Panel */}
+          <div className="flex-1 min-w-[400px]">
+            <WorkspacePanel activeTab={activeTab} onTabChange={setActiveTab} theme={theme} />
+          </div>
 
-        {/* Right Panel - Metrics */}
-        <div className="w-[280px] min-w-[240px] border-l border-dark-border/20 bg-dark-surface/40 backdrop-blur-xl overflow-y-auto">
-          <PhaseIndicator currentGate={currentGate} />
-          <div className="border-t border-dark-border/10">
-            <ActiveAgents />
-          </div>
-          <div className="border-t border-dark-border/10">
-            <GateProgress currentGate={currentGate} />
-          </div>
-          <div className="border-t border-dark-border/10">
-            <CostMetrics />
-          </div>
-          <div className="border-t border-dark-border/10">
-            <TeachingMoments skillLevel={skillLevel} />
+          {/* Right Panel */}
+          <div className={`w-[260px] min-w-[220px] p-3 flex flex-col gap-3 ${isDark ? 'bg-slate-900/30' : 'bg-teal-900/30'}`}>
+            <PhaseIndicator
+              currentPhase={currentPhase}
+              onPhaseClick={(phase) => {
+                setSelectedPhase(phase);
+                setShowPhaseDetail(true);
+              }}
+              theme={theme}
+            />
+            <Panel theme={theme} className="flex-1 overflow-auto">
+              <ActiveAgentsPanel phase={currentPhase} theme={theme} />
+              <div className={`border-t mx-3 ${isDark ? 'border-slate-700/30' : 'border-teal-700/30'}`} />
+              <GateProgressPanel
+                currentGate={currentGate}
+                currentPhase={currentPhase}
+                theme={theme}
+                onGateClick={() => setShowGateApproval(true)}
+              />
+              <div className={`border-t mx-3 ${isDark ? 'border-slate-700/30' : 'border-teal-700/30'}`} />
+              <CostMetrics phase={currentPhase} theme={theme} />
+            </Panel>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

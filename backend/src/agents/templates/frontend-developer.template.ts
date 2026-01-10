@@ -122,6 +122,44 @@ const { data, isLoading } = useQuery({
 4. **Skipping tests** — Test all critical paths
 5. **Ignoring accessibility** — Add ARIA labels, keyboard nav
 
+## Code Output Format
+
+**CRITICAL:** When generating code files, use this EXACT format for each file:
+
+\`\`\`typescript:src/components/Button.tsx
+import React from 'react';
+
+export const Button: React.FC<Props> = ({ children }) => {
+  return <button>{children}</button>;
+};
+\`\`\`
+
+\`\`\`typescript:src/hooks/useAuth.ts
+import { useState } from 'react';
+
+export const useAuth = () => {
+  const [user, setUser] = useState(null);
+  return { user, setUser };
+};
+\`\`\`
+
+**Format Rules:**
+1. Use fence notation with language and file path: \`\`\`typescript:path/to/file.ts
+2. File path must be relative to project root (e.g., \`src/\`, \`tests/\`)
+3. Include complete, working code (no placeholders or TODOs)
+4. Generate ALL necessary files (components, hooks, stores, tests, configs)
+5. Each file must be in its own code block
+
+**Files to Generate:**
+- Components: \`src/components/**/*.tsx\`
+- Pages: \`src/pages/**/*.tsx\`
+- Hooks: \`src/hooks/**/*.ts\`
+- Stores: \`src/stores/**/*.ts\`
+- Utils: \`src/utils/**/*.ts\`
+- Tests: \`src/**/*.test.tsx\`
+- Config: \`vite.config.ts\`, \`tsconfig.json\`, \`tailwind.config.js\`
+- Package: \`package.json\`
+
 **Ready to build the frontend. Share the specs and design system.**
 `,
 

@@ -122,6 +122,57 @@ export class UserService {
 4. **Skipping tests** — Test all endpoints
 5. **N+1 queries** — Use Prisma includes and eager loading
 
+## Code Output Format
+
+**CRITICAL:** When generating code files, use this EXACT format for each file:
+
+\`\`\`typescript:src/users/users.controller.ts
+import { Controller, Get, Post, Body } from '@nestjs/common';
+import { UsersService } from './users.service';
+
+@Controller('users')
+export class UsersController {
+  constructor(private readonly usersService: UsersService) {}
+
+  @Get()
+  async findAll() {
+    return this.usersService.findAll();
+  }
+}
+\`\`\`
+
+\`\`\`typescript:src/users/users.service.ts
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class UsersService {
+  constructor(private prisma: PrismaService) {}
+
+  async findAll() {
+    return this.prisma.user.findMany();
+  }
+}
+\`\`\`
+
+**Format Rules:**
+1. Use fence notation with language and file path: \`\`\`typescript:path/to/file.ts
+2. File path must be relative to project root (e.g., \`src/\`, \`prisma/\`)
+3. Include complete, working code (no placeholders or TODOs)
+4. Generate ALL necessary files (controllers, services, DTOs, modules, tests)
+5. Each file must be in its own code block
+
+**Files to Generate:**
+- Controllers: \`src/**/*.controller.ts\`
+- Services: \`src/**/*.service.ts\`
+- DTOs: \`src/**/dto/*.dto.ts\`
+- Modules: \`src/**/*.module.ts\`
+- Entities: \`src/**/entities/*.entity.ts\`
+- Tests: \`src/**/*.spec.ts\`
+- Schema: \`prisma/schema.prisma\`
+- Config: \`tsconfig.json\`, \`nest-cli.json\`
+- Package: \`package.json\`
+
 **Ready to build the backend. Share the OpenAPI spec and Prisma schema.**
 `,
 

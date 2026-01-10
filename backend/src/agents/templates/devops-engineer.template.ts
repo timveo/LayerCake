@@ -148,6 +148,47 @@ jobs:
 4. **Missing monitoring** — Set up monitoring before deploying
 5. **Skipping staging** — Always test in staging first
 
+## Code Output Format
+
+**CRITICAL:** When generating configuration files, use this EXACT format:
+
+\`\`\`yaml:.github/workflows/deploy.yml
+name: Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: railway up
+\`\`\`
+
+\`\`\`dockerfile:Dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --production
+COPY . .
+CMD ["npm", "start"]
+\`\`\`
+
+**Format Rules:**
+1. Use fence notation with language and file path: \`\`\`yaml:path/to/file.yml
+2. File path must be relative to project root
+3. Include complete, working configurations (no placeholders)
+4. Generate ALL necessary files (Dockerfiles, workflows, configs)
+5. Each file must be in its own code block
+
+**Files to Generate:**
+- Docker: \`Dockerfile\`, \`docker-compose.yml\`, \`.dockerignore\`
+- CI/CD: \`.github/workflows/*.yml\`
+- Railway: \`railway.json\`, \`railway.toml\`
+- Nginx: \`nginx.conf\`
+- Docs: \`docs/DEPLOYMENT.md\`
+- Scripts: \`scripts/deploy.sh\`
+
 **Ready to deploy. Share the application for deployment setup.**
 `,
 

@@ -16,6 +16,7 @@ import {
 import { AgentExecutionService } from './services/agent-execution.service';
 import { AgentTemplateLoaderService } from './services/agent-template-loader.service';
 import { OrchestratorService } from './services/orchestrator.service';
+import { WorkflowCoordinatorService } from './services/workflow-coordinator.service';
 import { ExecuteAgentDto } from './dto/execute-agent.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -30,6 +31,7 @@ export class AgentsController {
     private readonly executionService: AgentExecutionService,
     private readonly templateLoader: AgentTemplateLoaderService,
     private readonly orchestrator: OrchestratorService,
+    private readonly workflowCoordinator: WorkflowCoordinatorService,
     private readonly wsGateway: AppWebSocketGateway,
   ) {}
 
@@ -168,5 +170,39 @@ export class AgentsController {
     @CurrentUser() user: any,
   ) {
     return this.orchestrator.routeTaskToAgent(projectId, user.id);
+  }
+
+  @Post('workflow/start')
+  @ApiOperation({ summary: 'Start project workflow with initial requirements' })
+  @ApiResponse({ status: 200, description: 'Workflow started successfully' })
+  async startWorkflow(
+    @Body() body: { projectId: string; requirements: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.workflowCoordinator.startProjectWorkflow(
+      body.projectId,
+      user.id,
+      body.requirements,
+    );
+  }
+
+  @Post('workflow/execute-next/:projectId')
+  @ApiOperation({ summary: 'Execute next task in workflow' })
+  @ApiResponse({ status: 200, description: 'Next task execution started' })
+  async executeNext(
+    @Param('projectId') projectId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.workflowCoordinator.executeNextTask(projectId, user.id);
+  }
+
+  @Get('workflow/status/:projectId')
+  @ApiOperation({ summary: 'Get workflow status for project' })
+  @ApiResponse({ status: 200, description: 'Workflow status retrieved successfully' })
+  async getWorkflowStatus(
+    @Param('projectId') projectId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.workflowCoordinator.getWorkflowStatus(projectId, user.id);
   }
 }

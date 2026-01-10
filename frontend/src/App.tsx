@@ -18,6 +18,7 @@ import { AgentExecution } from './pages/AgentExecution';
 import { Settings } from './pages/Settings';
 import { DocumentViewer } from './pages/DocumentViewer';
 import { MainLayout } from './components/layout/MainLayout';
+import { NotificationProvider } from './components/ui/Notification';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -79,6 +80,7 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <NotificationProvider />
       <BrowserRouter>
         <Routes>
           {/* Public Routes */}

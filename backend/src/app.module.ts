@@ -13,6 +13,7 @@ import { DocumentsModule } from './documents/documents.module';
 import { SpecificationsModule } from './specifications/specifications.module';
 import { AgentsModule } from './agents/agents.module';
 import { WebSocketModule } from './websocket/websocket.module';
+import { ProofArtifactsModule } from './proof-artifacts/proof-artifacts.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
@@ -31,6 +32,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     SpecificationsModule,
     AgentsModule,
     WebSocketModule,
+    ProofArtifactsModule,
   ],
   controllers: [AppController],
   providers: [

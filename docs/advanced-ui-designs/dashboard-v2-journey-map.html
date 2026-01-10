@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LayerCake - Journey Map Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: { 400: '#2dd4bf', 500: '#14b8a6', 600: '#0d9488', 950: '#042f2e' },
+            dark: {
+              bg: '#0a1414',
+              surface: '#0d1f1f',
+              elevated: '#14302f',
+              border: '#1a3636',
+              'text-primary': '#f0fdfa',
+              'text-secondary': '#99f6e4',
+              'text-muted': '#5eead4'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    @keyframes pulse-glow { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+    @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+    .animate-spin-slow { animation: spin-slow 8s linear infinite; }
+    .bg-dots { background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0); background-size: 24px 24px; }
+  </style>
+</head>
+<body class="bg-[#0a1414] text-[#f0fdfa] min-h-screen">
+
+  <!-- Hero Header -->
+  <header class="relative overflow-hidden border-b border-[#1a3636]/30">
+    <div class="absolute inset-0 bg-gradient-to-br from-[#042f2e]/50 via-transparent to-violet-950/30"></div>
+    <div class="absolute inset-0 bg-dots opacity-50"></div>
+
+    <div class="relative max-w-6xl mx-auto px-6 pt-12 pb-16 text-center">
+      <div class="flex items-center justify-center gap-3 mb-4">
+        <svg class="w-8 h-8 text-[#2dd4bf]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
+        </svg>
+        <h1 class="text-3xl font-bold bg-gradient-to-r from-[#2dd4bf] to-violet-400 bg-clip-text text-transparent">
+          Your Building Journey
+        </h1>
+      </div>
+      <p class="text-[#99f6e4] max-w-xl mx-auto">
+        Every great product is a story of decisions, discoveries, and dedication.
+        Here's yours.
+      </p>
+
+      <!-- Emotional Pulse -->
+      <div class="flex justify-center gap-4 mt-8">
+        <!-- Confident -->
+        <div class="bg-emerald-500/10 rounded-2xl p-4 text-center cursor-pointer hover:scale-105 transition-all">
+          <div class="w-12 h-12 mx-auto rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mb-2 animate-pulse-glow">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+            </svg>
+          </div>
+          <span class="text-xs font-medium text-[#99f6e4]">Feeling Confident</span>
+        </div>
+
+        <!-- Focused -->
+        <div class="bg-[#14b8a6]/10 rounded-2xl p-4 text-center cursor-pointer hover:scale-105 transition-all">
+          <div class="w-12 h-12 mx-auto rounded-full bg-gradient-to-br from-[#2dd4bf] to-blue-500 flex items-center justify-center mb-2 animate-pulse-glow">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+            </svg>
+          </div>
+          <span class="text-xs font-medium text-[#99f6e4]">Deep in Flow</span>
+        </div>
+
+        <!-- Excited -->
+        <div class="bg-amber-500/10 rounded-2xl p-4 text-center cursor-pointer hover:scale-105 transition-all">
+          <div class="w-12 h-12 mx-auto rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center mb-2 animate-pulse-glow">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+            </svg>
+          </div>
+          <span class="text-xs font-medium text-[#99f6e4]">Making Progress</span>
+        </div>
+
+        <!-- Celebrating -->
+        <div class="bg-violet-500/10 rounded-2xl p-4 text-center cursor-pointer hover:scale-105 transition-all">
+          <div class="w-12 h-12 mx-auto rounded-full bg-gradient-to-br from-violet-400 to-pink-500 flex items-center justify-center mb-2 animate-pulse-glow">
+            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
+            </svg>
+          </div>
+          <span class="text-xs font-medium text-[#99f6e4]">Wins Happening</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-12">
+    <!-- Journey Stats Bar -->
+    <div class="flex items-center justify-center gap-8 mb-12 p-4 rounded-2xl bg-[#14302f]/40 border border-[#1a3636]/30">
+      <div class="text-center">
+        <div class="text-2xl font-bold text-[#2dd4bf]">3</div>
+        <div class="text-xs text-[#5eead4]">Projects Started</div>
+      </div>
+      <div class="w-px h-8 bg-[#1a3636]/50"></div>
+      <div class="text-center">
+        <div class="text-2xl font-bold text-emerald-400">42</div>
+        <div class="text-xs text-[#5eead4]">Tasks Conquered</div>
+      </div>
+      <div class="w-px h-8 bg-[#1a3636]/50"></div>
+      <div class="text-center">
+        <div class="text-2xl font-bold text-violet-400">2</div>
+        <div class="text-xs text-[#5eead4]">Milestones Reached</div>
+      </div>
+      <div class="w-px h-8 bg-[#1a3636]/50"></div>
+      <div class="text-center">
+        <div class="text-2xl font-bold text-amber-400">12</div>
+        <div class="text-xs text-[#5eead4]">Learnings Captured</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-12 gap-8">
+      <!-- Main Journey Map -->
+      <div class="col-span-7">
+        <div class="mb-6">
+          <h2 class="text-xl font-semibold mb-2">The Path Forward</h2>
+          <p class="text-sm text-[#5eead4]">Your journey from idea to deployment</p>
+        </div>
+
+        <div class="relative">
+          <!-- Central Line -->
+          <div class="absolute left-1/2 top-0 bottom-0 w-1 bg-gradient-to-b from-emerald-500 via-[#14b8a6]/50 to-[#1a3636]/30 transform -translate-x-1/2"></div>
+
+          <!-- Milestone 1 - Complete (Left) -->
+          <div class="flex items-center gap-6 mb-4">
+            <div class="flex-1 max-w-md text-right">
+              <div class="p-5 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/30">
+                <div class="flex items-center gap-2 justify-end mb-2">
+                  <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium">🎯 Vision Set!</span>
+                </div>
+                <h3 class="text-lg font-semibold mb-2 text-emerald-400">The Vision Takes Shape</h3>
+                <p class="text-sm text-[#99f6e4] mb-3">You defined what you're building and why it matters. The foundation of every great product.</p>
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2 flex-row-reverse text-xs text-[#5eead4]">
+                    <svg class="w-3 h-3 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    <span>Clear problem statement defined</span>
+                  </div>
+                  <div class="flex items-center gap-2 flex-row-reverse text-xs text-[#5eead4]">
+                    <svg class="w-3 h-3 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    <span>Target users identified</span>
+                  </div>
+                </div>
+                <div class="mt-3 text-xs text-[#5eead4] text-right">3 days ago</div>
+              </div>
+            </div>
+
+            <!-- Node -->
+            <div class="relative flex flex-col items-center">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center z-10 border-4 bg-emerald-500 border-emerald-400/50">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <div class="w-1 h-24 bg-gradient-to-b from-emerald-500 to-emerald-500/30"></div>
+            </div>
+
+            <div class="flex-1 max-w-md"></div>
+          </div>
+
+          <!-- Milestone 2 - Complete (Right) -->
+          <div class="flex items-center gap-6 flex-row-reverse mb-4">
+            <div class="flex-1 max-w-md text-left">
+              <div class="p-5 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/30">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium">🏗️ Foundations Laid!</span>
+                </div>
+                <h3 class="text-lg font-semibold mb-2 text-emerald-400">Architecture Emerges</h3>
+                <p class="text-sm text-[#99f6e4] mb-3">The skeleton of your application took form. Decisions made here will echo through every feature.</p>
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2 text-xs text-[#5eead4]">
+                    <svg class="w-3 h-3 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    <span>Chose microservices for scalability</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-xs text-[#5eead4]">
+                    <svg class="w-3 h-3 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    <span>PostgreSQL fits your data model</span>
+                  </div>
+                </div>
+                <div class="mt-3 text-xs text-[#5eead4]">2 days ago</div>
+              </div>
+            </div>
+
+            <!-- Node -->
+            <div class="relative flex flex-col items-center">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center z-10 border-4 bg-emerald-500 border-emerald-400/50">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <div class="w-1 h-24 bg-gradient-to-b from-emerald-500 to-[#14b8a6]/50"></div>
+            </div>
+
+            <div class="flex-1 max-w-md"></div>
+          </div>
+
+          <!-- Milestone 3 - Current (Left) -->
+          <div class="flex items-center gap-6 mb-4">
+            <div class="flex-1 max-w-md text-right">
+              <div class="p-5 rounded-2xl bg-gradient-to-br from-[#14b8a6]/20 to-violet-500/20 border-2 border-[#2dd4bf]/50 shadow-lg shadow-[#14b8a6]/10">
+                <h3 class="text-lg font-semibold mb-2 text-[#99f6e4]">Core Features Come Alive</h3>
+                <p class="text-sm text-[#99f6e4] mb-3">You're breathing life into the essential functionality. This is where ideas become real.</p>
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2 flex-row-reverse text-xs text-[#5eead4]">
+                    <svg class="w-3 h-3 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    <span>Authentication system robust</span>
+                  </div>
+                  <div class="flex items-center gap-2 flex-row-reverse text-xs text-[#5eead4]">
+                    <svg class="w-3 h-3 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    <span>API design follows REST best practices</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Node - Current -->
+            <div class="relative flex flex-col items-center">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center z-10 border-4 bg-[#14b8a6] border-[#2dd4bf]/50 ring-4 ring-[#14b8a6]/20">
+                <svg class="w-6 h-6 text-white animate-spin-slow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+                </svg>
+              </div>
+              <div class="w-1 h-24 bg-[#1a3636]/50"></div>
+            </div>
+
+            <div class="flex-1 max-w-md"></div>
+          </div>
+
+          <!-- Milestone 4 - Future (Right) -->
+          <div class="flex items-center gap-6 flex-row-reverse mb-4">
+            <div class="flex-1 max-w-md text-left">
+              <div class="p-5 rounded-2xl bg-[#14302f]/40 border border-[#1a3636]/30 opacity-60">
+                <h3 class="text-lg font-semibold mb-2 text-[#5eead4]">Polish & Refinement</h3>
+                <p class="text-sm text-[#99f6e4]">The difference between good and great lies in the details you're about to add.</p>
+              </div>
+            </div>
+
+            <!-- Node -->
+            <div class="relative flex flex-col items-center">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center z-10 border-4 bg-[#14302f] border-[#1a3636]">
+                <svg class="w-5 h-5 text-[#5eead4]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"/>
+                </svg>
+              </div>
+              <div class="w-1 h-24 bg-[#1a3636]/30"></div>
+            </div>
+
+            <div class="flex-1 max-w-md"></div>
+          </div>
+
+          <!-- Milestone 5 - Future (Left) -->
+          <div class="flex items-center gap-6">
+            <div class="flex-1 max-w-md text-right">
+              <div class="p-5 rounded-2xl bg-[#14302f]/40 border border-[#1a3636]/30 opacity-60">
+                <h3 class="text-lg font-semibold mb-2 text-[#5eead4]">Ready for the World</h3>
+                <p class="text-sm text-[#99f6e4]">Your creation, ready to meet its users. This is what it's all been building toward.</p>
+              </div>
+            </div>
+
+            <!-- Node -->
+            <div class="relative flex flex-col items-center">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center z-10 border-4 bg-[#14302f] border-[#1a3636]">
+                <svg class="w-5 h-5 text-[#5eead4]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"/>
+                </svg>
+              </div>
+            </div>
+
+            <div class="flex-1 max-w-md"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column -->
+      <div class="col-span-5 space-y-6">
+        <!-- Current Chapter -->
+        <div>
+          <h2 class="text-xl font-semibold mb-4">Current Chapter</h2>
+          <div class="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-[#14302f] via-[#042f2e]/30 to-violet-950/20 border-[#14b8a6]/40 shadow-xl shadow-[#14b8a6]/10">
+            <!-- Chapter Header -->
+            <div class="p-6 border-b border-[#1a3636]/30">
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center font-mono font-bold text-lg bg-[#14b8a6]/20 text-[#2dd4bf]">3</div>
+                <div>
+                  <h3 class="font-semibold text-[#f0fdfa]">Building the Engine</h3>
+                  <p class="text-xs text-[#5eead4]">Chapter 3</p>
+                </div>
+              </div>
+              <p class="text-sm text-[#99f6e4] leading-relaxed">You've moved past planning and into creation. The core features are taking shape, each one carefully crafted to serve your users. This is the exciting middle chapter where progress becomes tangible.</p>
+            </div>
+
+            <!-- Achievements & Learnings -->
+            <div class="p-6 grid grid-cols-2 gap-6">
+              <div>
+                <div class="flex items-center gap-2 mb-3">
+                  <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
+                  </svg>
+                  <span class="text-xs font-semibold uppercase tracking-wider text-amber-400">Achievements</span>
+                </div>
+                <ul class="space-y-2">
+                  <li class="flex items-start gap-2 text-sm text-[#99f6e4]">
+                    <svg class="w-4 h-4 text-amber-400/50 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
+                    </svg>
+                    User authentication complete
+                  </li>
+                  <li class="flex items-start gap-2 text-sm text-[#99f6e4]">
+                    <svg class="w-4 h-4 text-amber-400/50 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
+                    </svg>
+                    Database models defined
+                  </li>
+                  <li class="flex items-start gap-2 text-sm text-[#99f6e4]">
+                    <svg class="w-4 h-4 text-amber-400/50 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
+                    </svg>
+                    87% test coverage achieved
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <div class="flex items-center gap-2 mb-3">
+                  <svg class="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                  </svg>
+                  <span class="text-xs font-semibold uppercase tracking-wider text-violet-400">Learnings</span>
+                </div>
+                <ul class="space-y-2">
+                  <li class="flex items-start gap-2 text-sm text-[#99f6e4]">
+                    <svg class="w-4 h-4 text-violet-400/50 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    JWT tokens suit stateless needs
+                  </li>
+                  <li class="flex items-start gap-2 text-sm text-[#99f6e4]">
+                    <svg class="w-4 h-4 text-violet-400/50 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    Connection pooling prevents bottlenecks
+                  </li>
+                  <li class="flex items-start gap-2 text-sm text-[#99f6e4]">
+                    <svg class="w-4 h-4 text-violet-400/50 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                    </svg>
+                    Early testing catches issues faster
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- Next Step -->
+            <div class="px-6 pb-6">
+              <div class="flex items-center gap-3 p-4 rounded-xl bg-[#14b8a6]/10 border border-[#14b8a6]/30">
+                <svg class="w-5 h-5 text-[#2dd4bf]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+                </svg>
+                <div>
+                  <span class="text-xs text-[#2dd4bf] font-semibold uppercase tracking-wider">Next Step</span>
+                  <p class="text-sm text-[#f0fdfa]">Implement the project dashboard with real-time updates</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Builder's Inspiration -->
+        <div class="bg-[#14302f]/40 rounded-2xl border border-[#1a3636]/30 p-6">
+          <div class="text-center py-6">
+            <svg class="w-8 h-8 text-[#2dd4bf]/50 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+            </svg>
+            <blockquote class="text-lg italic text-[#99f6e4] mb-2">
+              "Every line of code is a step forward in your journey."
+            </blockquote>
+            <cite class="text-sm text-[#5eead4]">— The Process</cite>
+          </div>
+        </div>
+
+        <!-- Recent Wins -->
+        <div class="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 rounded-2xl border border-emerald-500/20 p-6">
+          <div class="flex items-center gap-2 mb-4">
+            <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
+            </svg>
+            <h3 class="font-semibold text-emerald-400">Recent Wins</h3>
+          </div>
+          <ul class="space-y-3">
+            <li class="flex items-start gap-3">
+              <span class="text-lg">🎉</span>
+              <div>
+                <p class="text-sm text-[#f0fdfa]">All tests passing!</p>
+                <p class="text-xs text-[#5eead4]">2 hours ago</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-lg">✨</span>
+              <div>
+                <p class="text-sm text-[#f0fdfa]">Auth flow complete</p>
+                <p class="text-xs text-[#5eead4]">Yesterday</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="text-lg">🚀</span>
+              <div>
+                <p class="text-sm text-[#f0fdfa]">API performance improved 40%</p>
+                <p class="text-xs text-[#5eead4]">2 days ago</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

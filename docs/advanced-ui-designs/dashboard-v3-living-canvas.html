@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LayerCake - Living Canvas Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: { 400: '#2dd4bf', 500: '#14b8a6', 600: '#0d9488', 950: '#042f2e' },
+            dark: {
+              bg: '#0a1414',
+              surface: '#0d1f1f',
+              elevated: '#14302f',
+              border: '#1a3636'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+    }
+    @keyframes pulse-grow {
+      0%, 100% { transform: scale(1); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 1; }
+    }
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 20px rgba(20, 184, 166, 0.3); }
+      50% { box-shadow: 0 0 40px rgba(20, 184, 166, 0.6); }
+    }
+    @keyframes spin-slow {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    @keyframes particle-float {
+      0% { transform: translateY(0) translateX(0); opacity: 0.4; }
+      50% { opacity: 0.6; }
+      100% { transform: translateY(-100vh) translateX(20px); opacity: 0; }
+    }
+
+    .animate-float { animation: float 3s ease-in-out infinite; }
+    .animate-pulse-grow { animation: pulse-grow 2s ease-in-out infinite; }
+    .animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+    .animate-spin-slow { animation: spin-slow 30s linear infinite; }
+
+    .particle {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      animation: particle-float linear infinite;
+    }
+
+    .orb {
+      transition: all 0.3s ease;
+    }
+    .orb:hover {
+      transform: scale(1.1);
+      filter: brightness(1.2);
+    }
+
+    .connection-line {
+      stroke-dasharray: 5, 5;
+      animation: dash 20s linear infinite;
+    }
+    @keyframes dash {
+      to { stroke-dashoffset: -100; }
+    }
+  </style>
+</head>
+<body class="bg-[#0a1414] text-[#f0fdfa] min-h-screen relative overflow-hidden">
+
+  <!-- Ambient Background -->
+  <div class="absolute inset-0 bg-gradient-to-br from-[#042f2e]/20 via-[#0a1414] to-violet-950/20"></div>
+
+  <!-- Floating Particles -->
+  <div id="particles" class="absolute inset-0 pointer-events-none overflow-hidden"></div>
+
+  <!-- Header -->
+  <header class="relative border-b border-[#1a3636]/20 bg-[#0d1f1f]/30 backdrop-blur-xl z-10">
+    <div class="max-w-7xl mx-auto px-6 py-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-4">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-[#2dd4bf]/20 to-violet-400/20 border border-[#14b8a6]/30 flex items-center justify-center animate-spin-slow">
+            <svg class="w-5 h-5 text-[#2dd4bf]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold">Living Canvas</h1>
+            <p class="text-xs text-[#5eead4]">Your project ecosystem</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <!-- Time of Day -->
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#14302f]/50 border border-[#1a3636]/30">
+            <svg class="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+            </svg>
+            <span class="text-xs text-[#5eead4]">Night owl mode</span>
+          </div>
+
+          <!-- Health Indicator -->
+          <div class="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#14302f]/50 border border-[#1a3636]/30">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="text-sm font-medium text-[#99f6e4]">
+              Ecosystem Health: <span class="text-emerald-400 font-bold">89%</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="relative max-w-7xl mx-auto px-6 py-8 z-10">
+    <div class="grid grid-cols-12 gap-6">
+      <!-- Main Canvas -->
+      <div class="col-span-8">
+        <div class="bg-[#14302f]/30 backdrop-blur border border-[#1a3636]/20 rounded-2xl p-6 h-[550px] relative overflow-hidden">
+          <div class="absolute top-4 left-4 z-10">
+            <h2 class="text-lg font-semibold mb-1">Project Ecosystem</h2>
+            <p class="text-xs text-[#5eead4]">Watch your components breathe and interact</p>
+          </div>
+
+          <!-- SVG Canvas for Connections and Nodes -->
+          <svg class="absolute inset-0 w-full h-full" style="overflow: visible;">
+            <defs>
+              <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="rgb(20, 184, 166)" stop-opacity="0.3"/>
+                <stop offset="50%" stop-color="rgb(20, 184, 166)" stop-opacity="0.6"/>
+                <stop offset="100%" stop-color="rgb(20, 184, 166)" stop-opacity="0.3"/>
+              </linearGradient>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                <feMerge>
+                  <feMergeNode in="coloredBlur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+
+            <!-- Connection Lines -->
+            <path class="connection-line" d="M 200 150 Q 300 120 400 200" stroke="url(#lineGradient)" stroke-width="2" fill="none"/>
+            <path class="connection-line" d="M 400 200 Q 350 260 300 320" stroke="url(#lineGradient)" stroke-width="2" fill="none"/>
+            <path class="connection-line" d="M 200 150 Q 250 230 300 320" stroke="url(#lineGradient)" stroke-width="2" fill="none"/>
+            <path class="connection-line" d="M 400 200 Q 475 175 550 150" stroke="url(#lineGradient)" stroke-width="2" fill="none"/>
+            <path class="connection-line" d="M 550 150 Q 600 215 650 280" stroke="url(#lineGradient)" stroke-width="2" fill="none"/>
+            <path class="connection-line" d="M 400 200 Q 450 275 500 350" stroke="url(#lineGradient)" stroke-width="2" fill="none"/>
+            <path class="connection-line" d="M 500 350 Q 425 385 350 420" stroke="url(#lineGradient)" stroke-width="2" fill="none"/>
+          </svg>
+
+          <!-- Organic Nodes -->
+          <!-- Auth Node - Large, Thriving -->
+          <div class="orb absolute cursor-pointer" style="left: 200px; top: 150px; transform: translate(-50%, -50%);">
+            <div class="absolute inset-0 rounded-full bg-gradient-to-br from-[#2dd4bf] to-cyan-500 blur-xl opacity-30 animate-pulse-grow" style="width: 128px; height: 128px; margin: -16px;"></div>
+            <div class="relative w-24 h-24 rounded-full bg-gradient-to-br from-[#2dd4bf] to-cyan-500 flex items-center justify-center shadow-lg animate-pulse-glow">
+              <div class="text-center text-white">
+                <div class="text-xs font-bold opacity-90">95%</div>
+              </div>
+              <div class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-400 animate-pulse"></div>
+            </div>
+            <div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
+              <span class="text-xs font-medium text-[#99f6e4]">Authentication</span>
+            </div>
+          </div>
+
+          <!-- API Node - Large, Active -->
+          <div class="orb absolute cursor-pointer" style="left: 400px; top: 200px; transform: translate(-50%, -50%);">
+            <div class="absolute inset-0 rounded-full bg-gradient-to-br from-[#2dd4bf] to-cyan-500 blur-xl opacity-25 animate-pulse-grow" style="width: 112px; height: 112px; margin: -8px;"></div>
+            <div class="relative w-24 h-24 rounded-full bg-gradient-to-br from-[#2dd4bf] to-cyan-500 flex items-center justify-center shadow-lg" style="animation: pulse-grow 2.5s ease-in-out infinite;">
+              <div class="text-center text-white">
+                <div class="text-xs font-bold opacity-90">88%</div>
+              </div>
+            </div>
+            <div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
+              <span class="text-xs font-medium text-[#99f6e4]">API Layer</span>
+            </div>
+          </div>
+
+          <!-- Database Node - Medium, Active -->
+          <div class="orb absolute cursor-pointer" style="left: 300px; top: 320px; transform: translate(-50%, -50%);">
+            <div class="absolute inset-0 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 blur-xl opacity-25" style="width: 80px; height: 80px;"></div>
+            <div class="relative w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/40" style="animation: pulse-grow 2.2s ease-in-out infinite;">
+              <div class="text-center text-white">
+                <div class="text-xs font-bold opacity-90">92%</div>
+              </div>
+            </div>
+            <div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
+              <span class="text-xs font-medium text-[#99f6e4]">Database</span>
+            </div>
+          </div>
+
+          <!-- Features Node - Medium, Active -->
+          <div class="orb absolute cursor-pointer" style="left: 550px; top: 150px; transform: translate(-50%, -50%);">
+            <div class="absolute inset-0 rounded-full bg-gradient-to-br from-violet-400 to-purple-500 blur-xl opacity-25" style="width: 80px; height: 80px;"></div>
+            <div class="relative w-20 h-20 rounded-full bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center shadow-lg shadow-violet-500/40" style="animation: pulse-grow 2.3s ease-in-out infinite;">
+              <div class="text-center text-white">
+                <div class="text-xs font-bold opacity-90">76%</div>
+              </div>
+            </div>
+            <div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
+              <span class="text-xs font-medium text-[#99f6e4]">Features</span>
+            </div>
+          </div>
+
+          <!-- UI Node - Medium -->
+          <div class="orb absolute cursor-pointer" style="left: 650px; top: 280px; transform: translate(-50%, -50%);">
+            <div class="absolute inset-0 rounded-full bg-gradient-to-br from-violet-400 to-purple-500 blur-xl opacity-20" style="width: 72px; height: 72px;"></div>
+            <div class="relative w-16 h-16 rounded-full bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center shadow-lg shadow-violet-500/40" style="animation: pulse-grow 2.4s ease-in-out infinite;">
+              <div class="text-center text-white">
+                <div class="text-[10px] font-bold opacity-90">82%</div>
+              </div>
+            </div>
+            <div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
+              <span class="text-xs font-medium text-[#99f6e4]">Interface</span>
+            </div>
+          </div>
+
+          <!-- Tests Node - Small, Thriving -->
+          <div class="orb absolute cursor-pointer" style="left: 500px; top: 350px; transform: translate(-50%, -50%);">
+            <div class="absolute inset-0 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 blur-xl opacity-25" style="width: 56px; height: 56px;"></div>
+            <div class="relative w-14 h-14 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/40" style="animation: pulse-grow 1.8s ease-in-out infinite;">
+              <div class="text-center text-white">
+                <div class="text-[10px] font-bold opacity-90">87%</div>
+              </div>
+              <div class="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></div>
+            </div>
+            <div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
+              <span class="text-xs font-medium text-[#99f6e4]">Test Suite</span>
+            </div>
+          </div>
+
+          <!-- CI/CD Node - Small, Dormant -->
+          <div class="orb absolute cursor-pointer" style="left: 350px; top: 420px; transform: translate(-50%, -50%);">
+            <div class="relative w-14 h-14 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/40" style="animation: pulse-grow 4s ease-in-out infinite;">
+              <div class="text-center text-white">
+                <div class="text-[10px] font-bold opacity-90">100%</div>
+              </div>
+            </div>
+            <div class="absolute -bottom-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
+              <span class="text-xs font-medium text-[#99f6e4]">CI/CD</span>
+            </div>
+          </div>
+
+          <!-- Selected Node Detail (shown at bottom) -->
+          <div class="absolute bottom-4 left-4 right-4 bg-[#0a1414]/90 backdrop-blur-xl rounded-xl border border-[#1a3636]/30 p-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-semibold text-[#f0fdfa]">Authentication</h3>
+                <p class="text-sm text-[#5eead4]">Core • Thriving</p>
+              </div>
+              <div class="flex items-center gap-4">
+                <div class="text-center">
+                  <div class="text-2xl font-bold text-[#2dd4bf]">95%</div>
+                  <div class="text-xs text-[#5eead4]">Health</div>
+                </div>
+                <div class="text-center">
+                  <div class="text-2xl font-bold text-violet-400">2</div>
+                  <div class="text-xs text-[#5eead4]">Connections</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Sidebar -->
+      <div class="col-span-4 space-y-6">
+        <!-- Vital Signs -->
+        <div class="bg-[#14302f]/30 backdrop-blur border border-[#1a3636]/20 rounded-2xl p-6">
+          <h2 class="text-lg font-semibold mb-4">Vital Signs</h2>
+          <div class="space-y-4">
+            <!-- Code Quality -->
+            <div class="bg-emerald-500/10 rounded-xl p-4 border border-[#1a3636]/20">
+              <div class="flex items-center gap-3 mb-3">
+                <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                </svg>
+                <span class="text-sm font-medium text-[#f0fdfa]">Code Quality</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="flex-1 h-2 bg-[#1a3636]/30 rounded-full overflow-hidden">
+                  <div class="h-full bg-emerald-500 rounded-full" style="width: 94%;"></div>
+                </div>
+                <span class="text-sm font-mono font-bold text-emerald-400">94%</span>
+              </div>
+            </div>
+
+            <!-- Test Coverage -->
+            <div class="bg-emerald-500/10 rounded-xl p-4 border border-[#1a3636]/20">
+              <div class="flex items-center gap-3 mb-3">
+                <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+                </svg>
+                <span class="text-sm font-medium text-[#f0fdfa]">Test Coverage</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="flex-1 h-2 bg-[#1a3636]/30 rounded-full overflow-hidden">
+                  <div class="h-full bg-emerald-500 rounded-full" style="width: 87%;"></div>
+                </div>
+                <span class="text-sm font-mono font-bold text-emerald-400">87%</span>
+              </div>
+            </div>
+
+            <!-- Security -->
+            <div class="bg-emerald-500/10 rounded-xl p-4 border border-[#1a3636]/20">
+              <div class="flex items-center gap-3 mb-3">
+                <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                </svg>
+                <span class="text-sm font-medium text-[#f0fdfa]">Security</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="flex-1 h-2 bg-[#1a3636]/30 rounded-full overflow-hidden">
+                  <div class="h-full bg-emerald-500 rounded-full" style="width: 100%;"></div>
+                </div>
+                <span class="text-sm font-mono font-bold text-emerald-400">100%</span>
+              </div>
+            </div>
+
+            <!-- Progress -->
+            <div class="bg-[#14b8a6]/10 rounded-xl p-4 border border-[#1a3636]/20">
+              <div class="flex items-center gap-3 mb-3">
+                <svg class="w-5 h-5 text-[#2dd4bf]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                </svg>
+                <span class="text-sm font-medium text-[#f0fdfa]">Progress</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="flex-1 h-2 bg-[#1a3636]/30 rounded-full overflow-hidden">
+                  <div class="h-full bg-[#14b8a6] rounded-full" style="width: 72%;"></div>
+                </div>
+                <span class="text-sm font-mono font-bold text-[#2dd4bf]">72%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Living Insights -->
+        <div class="bg-[#14302f]/30 backdrop-blur border border-[#1a3636]/20 rounded-2xl p-6">
+          <h2 class="text-lg font-semibold mb-4">Living Insights</h2>
+          <div class="space-y-3">
+            <!-- Observation -->
+            <div class="bg-gradient-to-br from-[#14b8a6]/10 to-[#14b8a6]/5 rounded-xl border border-[#1a3636]/20 p-4 cursor-pointer hover:border-[#14b8a6]/30 transition-all">
+              <div class="flex items-center gap-2 mb-2">
+                <svg class="w-4 h-4 text-[#2dd4bf]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                </svg>
+                <span class="text-sm font-semibold text-[#2dd4bf]">Pattern Detected</span>
+              </div>
+              <p class="text-sm text-[#99f6e4] leading-relaxed">Your authentication module has been exceptionally stable. The patterns you've established here could be replicated in your API error handling.</p>
+            </div>
+
+            <!-- Suggestion -->
+            <div class="bg-gradient-to-br from-amber-500/10 to-amber-500/5 rounded-xl border border-[#1a3636]/20 p-4 cursor-pointer hover:border-amber-500/30 transition-all">
+              <div class="flex items-center gap-2 mb-2">
+                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                <span class="text-sm font-semibold text-amber-400">Growth Opportunity</span>
+              </div>
+              <p class="text-sm text-[#99f6e4] leading-relaxed">Feature development velocity is increasing. Consider adding more integration tests to maintain quality as you scale.</p>
+            </div>
+
+            <!-- Celebration -->
+            <div class="bg-gradient-to-br from-violet-500/10 to-violet-500/5 rounded-xl border border-[#1a3636]/20 p-4 cursor-pointer hover:border-violet-500/30 transition-all">
+              <div class="flex items-center gap-2 mb-2">
+                <svg class="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+                </svg>
+                <span class="text-sm font-semibold text-violet-400">Ecosystem Thriving</span>
+              </div>
+              <p class="text-sm text-[#99f6e4] leading-relaxed">Your test coverage has grown 15% this week! The codebase is becoming more resilient with every commit.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ecosystem Stats -->
+        <div class="bg-[#14302f]/30 backdrop-blur border border-[#1a3636]/20 rounded-2xl p-6">
+          <h2 class="text-lg font-semibold mb-4">Ecosystem Stats</h2>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="text-center p-3 rounded-xl bg-[#0a1414]/50">
+              <div class="text-2xl font-bold text-[#2dd4bf]">3</div>
+              <div class="text-xs text-[#5eead4]">Active Projects</div>
+            </div>
+            <div class="text-center p-3 rounded-xl bg-[#0a1414]/50">
+              <div class="text-2xl font-bold text-emerald-400">2</div>
+              <div class="text-xs text-[#5eead4]">Thriving Modules</div>
+            </div>
+            <div class="text-center p-3 rounded-xl bg-[#0a1414]/50">
+              <div class="text-2xl font-bold text-violet-400">7</div>
+              <div class="text-xs text-[#5eead4]">Connections</div>
+            </div>
+            <div class="text-center p-3 rounded-xl bg-[#0a1414]/50">
+              <div class="text-2xl font-bold text-amber-400">4</div>
+              <div class="text-xs text-[#5eead4]">Gates Passed</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Create floating particles
+    const particlesContainer = document.getElementById('particles');
+    const colors = ['#14b8a6', '#8b5cf6', '#10b981', '#f59e0b'];
+
+    for (let i = 0; i < 30; i++) {
+      const particle = document.createElement('div');
+      particle.className = 'particle';
+      particle.style.left = Math.random() * 100 + '%';
+      particle.style.top = Math.random() * 100 + '%';
+      particle.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+      particle.style.animationDuration = (15 + Math.random() * 20) + 's';
+      particle.style.animationDelay = Math.random() * 10 + 's';
+      particlesContainer.appendChild(particle);
+    }
+  </script>
+</body>
+</html>

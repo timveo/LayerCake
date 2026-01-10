@@ -106,4 +106,33 @@ export class DocumentsController {
   async delete(@Param('id') id: string, @CurrentUser() user: any) {
     return this.documentsService.delete(id, user.id);
   }
+
+  @Post('generate-from-agent')
+  @ApiOperation({ summary: 'Generate documents from agent output' })
+  @ApiResponse({
+    status: 201,
+    description: 'Documents generated successfully from agent output',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Cannot generate documents for project you do not own',
+  })
+  async generateFromAgent(
+    @Body()
+    body: {
+      projectId: string;
+      agentId: string;
+      agentType: string;
+      agentOutput: string;
+    },
+    @CurrentUser() user: any,
+  ) {
+    return this.documentsService.generateFromAgentOutput(
+      body.projectId,
+      body.agentId,
+      body.agentType,
+      body.agentOutput,
+      user.id,
+    );
+  }
 }

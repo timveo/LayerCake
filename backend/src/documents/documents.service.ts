@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
@@ -267,5 +268,218 @@ export class DocumentsService {
         other,
       },
     };
+  }
+
+  /**
+   * Generate documents from agent output
+   * Parses structured agent response and creates documents in database
+   */
+  async generateFromAgentOutput(
+    projectId: string,
+    agentId: string,
+    agentType: string,
+    agentOutput: string,
+    userId: string,
+  ): Promise<any[]> {
+    // Verify project ownership
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    });
+
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (project.ownerId !== userId) {
+      throw new ForbiddenException(
+        'You can only generate documents for your own projects',
+      );
+    }
+
+    // Parse agent output for document sections
+    const documents = this.parseAgentOutputForDocuments(agentType, agentOutput);
+
+    // Create documents in database
+    const createdDocuments = [];
+    for (const doc of documents) {
+      const created = await this.prisma.document.create({
+        data: {
+          projectId,
+          agentId,
+          documentType: doc.type as any, // Type assertion for DocumentType enum
+          title: doc.title,
+          content: doc.content,
+          version: 1,
+          createdById: userId,
+        },
+        include: {
+          project: true,
+          createdBy: {
+            select: { id: true, name: true, email: true },
+          },
+        },
+      });
+      createdDocuments.push(created);
+    }
+
+    return createdDocuments;
+  }
+
+  /**
+   * Parse agent output based on agent type
+   */
+  private parseAgentOutputForDocuments(
+    agentType: string,
+    output: string,
+  ): Array<{ type: string; title: string; content: string }> {
+    const documents: Array<{ type: string; title: string; content: string }> = [];
+
+    switch (agentType) {
+      case 'PRODUCT_MANAGER':
+        // Extract PRD document
+        documents.push({
+          type: 'REQUIREMENTS',
+          title: 'Product Requirements Document (PRD)',
+          content: this.extractSection(output, ['# PRD', '# Product Requirements', '## PRD']) || output,
+        });
+
+        // Extract user stories if present
+        const userStories = this.extractSection(output, ['# User Stories', '## User Stories', '### User Stories']);
+        if (userStories) {
+          documents.push({
+            type: 'USER_STORY',
+            title: 'User Stories',
+            content: userStories,
+          });
+        }
+        break;
+
+      case 'ARCHITECT':
+        // Extract architecture document
+        documents.push({
+          type: 'ARCHITECTURE',
+          title: 'System Architecture',
+          content: this.extractSection(output, ['# Architecture', '# System Architecture', '## Architecture']) || output,
+        });
+
+        // Extract API spec section (reference, actual spec in Specification table)
+        const apiSection = this.extractSection(output, ['# API Specification', '## API Design', '### OpenAPI']);
+        if (apiSection) {
+          documents.push({
+            type: 'API_SPEC',
+            title: 'API Specification Overview',
+            content: apiSection,
+          });
+        }
+
+        // Extract database schema section (reference, actual schema in Specification table)
+        const dbSection = this.extractSection(output, ['# Database Schema', '## Data Model', '### Prisma']);
+        if (dbSection) {
+          documents.push({
+            type: 'DATABASE_SCHEMA',
+            title: 'Database Schema Overview',
+            content: dbSection,
+          });
+        }
+        break;
+
+      case 'QA_ENGINEER':
+        // Extract test plan
+        documents.push({
+          type: 'TEST_PLAN',
+          title: 'Test Plan and Coverage Report',
+          content: this.extractSection(output, ['# Test Plan', '# Testing', '## Test Coverage']) || output,
+        });
+        break;
+
+      case 'DEVOPS_ENGINEER':
+      case 'AIOPS_ENGINEER':
+        // Extract deployment guide
+        documents.push({
+          type: 'DEPLOYMENT_GUIDE',
+          title: 'Deployment Guide',
+          content: this.extractSection(output, ['# Deployment', '# Deploy', '## Deployment Guide']) || output,
+        });
+        break;
+
+      case 'FRONTEND_DEVELOPER':
+      case 'BACKEND_DEVELOPER':
+      case 'ML_ENGINEER':
+      case 'DATA_ENGINEER':
+      case 'PROMPT_ENGINEER':
+        // Extract implementation notes/code documentation
+        documents.push({
+          type: 'CODE',
+          title: `${agentType} Implementation`,
+          content: output,
+        });
+        break;
+
+      default:
+        // Generic document for other agents
+        documents.push({
+          type: 'OTHER',
+          title: `${agentType} Output`,
+          content: output,
+        });
+    }
+
+    return documents;
+  }
+
+  /**
+   * Extract a section from markdown content using headings
+   */
+  private extractSection(content: string, headings: string[]): string | null {
+    for (const heading of headings) {
+      const regex = new RegExp(`${heading}[\\s\\S]*?(?=(\\n#[^#]|$))`, 'i');
+      const match = content.match(regex);
+      if (match) {
+        return match[0].trim();
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Extract structured handoff data from agent output
+   * Looks for JSON handoff format in agent response
+   */
+  extractHandoffData(agentOutput: string): {
+    deliverables: string[];
+    nextAgent: string[];
+    nextAction: string;
+    artifacts?: string[];
+  } | null {
+    // Try to find JSON handoff block
+    const jsonMatch = agentOutput.match(/```json\s*\n(\{[\s\S]*?\})\s*\n```/);
+    if (jsonMatch) {
+      try {
+        const handoffData = JSON.parse(jsonMatch[1]);
+        return handoffData;
+      } catch (e) {
+        // JSON parsing failed, continue to fallback
+      }
+    }
+
+    // Fallback: Extract sections manually
+    const deliverables: string[] = [];
+    const deliverablesMatch = agentOutput.match(/##?\s*Deliverables\s*[\s\S]*?(?=\n##?|\n\n|$)/i);
+    if (deliverablesMatch) {
+      const lines = deliverablesMatch[0].split('\n');
+      for (const line of lines) {
+        const match = line.match(/^[\s-]*[•\-\*]\s*(.+)$/);
+        if (match) {
+          deliverables.push(match[1].trim());
+        }
+      }
+    }
+
+    const nextActionMatch = agentOutput.match(/##?\s*Next\s*(?:Action|Step)s?\s*[\s:]*(.+?)(?=\n##?|\n\n|$)/is);
+    const nextAction = nextActionMatch ? nextActionMatch[1].trim() : '';
+
+    return deliverables.length > 0 || nextAction
+      ? { deliverables, nextAgent: [], nextAction, artifacts: [] }
+      : null;
   }
 }

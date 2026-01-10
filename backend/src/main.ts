@@ -2,9 +2,15 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { SentryExceptionFilter } from './observability/sentry-exception.filter';
+import { SentryService } from './observability/sentry.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Get Sentry service and apply global exception filter
+  const sentryService = app.get(SentryService);
+  app.useGlobalFilters(new SentryExceptionFilter(sentryService));
 
   // Enable CORS
   app.enableCors({

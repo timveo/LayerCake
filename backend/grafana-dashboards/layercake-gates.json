@@ -1,0 +1,133 @@
+{
+  "dashboard": {
+    "title": "LayerCake Gates & Workflows",
+    "tags": ["layercake", "gates", "workflows"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Gate Transitions",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(layercake_gate_transitions_total[5m])) by (to_gate)",
+            "refId": "A",
+            "legendFormat": "{{to_gate}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "Gate Approval Duration",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(layercake_gate_approval_duration_seconds_bucket[5m])) by (le, gate_type))",
+            "refId": "A",
+            "legendFormat": "{{gate_type}} (p95)"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Current Gate Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "layercake_current_gate_status",
+            "refId": "A",
+            "legendFormat": "{{gate_type}} - {{project_id}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "value": 0, "text": "Pending" },
+              { "value": 1, "text": "Approved" },
+              { "value": 2, "text": "Rejected" }
+            ]
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Build Success Rate",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "sum(layercake_build_executions_total{status=\"success\"}) / sum(layercake_build_executions_total) * 100",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 6, "w": 8, "x": 0, "y": 16 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 70, "color": "yellow" },
+                { "value": 90, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Test Coverage",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "avg(layercake_test_coverage_percentage)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 6, "w": 8, "x": 8, "y": 16 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 60, "color": "yellow" },
+                { "value": 80, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Build Duration by Stage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(layercake_build_duration_seconds_bucket[5m])) by (le, stage))",
+            "refId": "A",
+            "legendFormat": "{{stage}} (p95)"
+          }
+        ],
+        "gridPos": { "h": 6, "w": 8, "x": 16, "y": 16 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 38,
+    "version": 1
+  }
+}

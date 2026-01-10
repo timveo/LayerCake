@@ -33,9 +33,15 @@ import { EventsModule } from './events/events.module';
 import { EmbeddingsModule } from './embeddings/embeddings.module';
 import { QueueModule } from './queue/queue.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { ObservabilityModule } from './observability/observability.module';
+import { StorageModule } from './storage/storage.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
+    ObservabilityModule,
+    StorageModule,
+    AnalyticsModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '../.env',

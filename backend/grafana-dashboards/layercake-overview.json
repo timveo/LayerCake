@@ -1,0 +1,131 @@
+{
+  "dashboard": {
+    "title": "LayerCake Overview",
+    "tags": ["layercake", "overview"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Agent Executions (Total)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(layercake_agent_execution_total)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "Agent Success Rate",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "sum(layercake_agent_execution_total{status=\"success\"}) / sum(layercake_agent_execution_total) * 100",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 70, "color": "yellow" },
+                { "value": 90, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Total Cost (USD)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(layercake_agent_cost_usd_total)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 2
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Total Tokens Used",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(layercake_agent_tokens_used_total)",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+      },
+      {
+        "id": 5,
+        "title": "Agent Execution Duration (p95)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(layercake_agent_execution_duration_seconds_bucket[5m])) by (le, agent_type))",
+            "refId": "A",
+            "legendFormat": "{{agent_type}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 }
+      },
+      {
+        "id": 6,
+        "title": "Queue Depth by Priority",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "layercake_queue_depth",
+            "refId": "A",
+            "legendFormat": "{{priority}} - {{status}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 }
+      },
+      {
+        "id": 7,
+        "title": "Executions by Agent Type",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(layercake_agent_execution_total[5m])) by (agent_type)",
+            "refId": "A",
+            "legendFormat": "{{agent_type}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 }
+      },
+      {
+        "id": 8,
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(layercake_errors_total[5m])) by (error_type)",
+            "refId": "A",
+            "legendFormat": "{{error_type}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 }
+      }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 38,
+    "version": 1
+  }
+}

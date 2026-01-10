@@ -1,0 +1,102 @@
+{
+  "dashboard": {
+    "title": "LayerCake Agents",
+    "tags": ["layercake", "agents"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Agent Execution Success/Failure",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(layercake_agent_execution_total{status=\"success\"}[5m])) by (agent_type)",
+            "refId": "A",
+            "legendFormat": "{{agent_type}} - Success"
+          },
+          {
+            "expr": "sum(rate(layercake_agent_execution_total{status=\"failed\"}[5m])) by (agent_type)",
+            "refId": "B",
+            "legendFormat": "{{agent_type}} - Failed"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "Agent Execution Duration by Model",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(layercake_agent_execution_duration_seconds_bucket[5m])) by (le, model))",
+            "refId": "A",
+            "legendFormat": "{{model}} (p95)"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Token Usage by Agent Type",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(layercake_agent_tokens_used_total{token_type=\"input\"}[5m])) by (agent_type)",
+            "refId": "A",
+            "legendFormat": "{{agent_type}} - Input"
+          },
+          {
+            "expr": "sum(rate(layercake_agent_tokens_used_total{token_type=\"output\"}[5m])) by (agent_type)",
+            "refId": "B",
+            "legendFormat": "{{agent_type}} - Output"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+      },
+      {
+        "id": 4,
+        "title": "Cost by Agent Type",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(layercake_agent_cost_usd_total[5m])) by (agent_type)",
+            "refId": "A",
+            "legendFormat": "{{agent_type}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Cost by Model",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(layercake_agent_cost_usd_total[5m])) by (model)",
+            "refId": "A",
+            "legendFormat": "{{model}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD"
+          }
+        }
+      }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 38,
+    "version": 1
+  }
+}

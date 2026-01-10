@@ -40,6 +40,9 @@ services:
       - R2_BUCKET=${R2_BUCKET}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+      - POSTHOG_API_KEY=${POSTHOG_API_KEY}
       - PORT=${PORT:-3000}
     depends_on:
       postgres:
@@ -89,6 +92,8 @@ services:
       - R2_ACCESS_KEY=${R2_ACCESS_KEY}
       - R2_SECRET_KEY=${R2_SECRET_KEY}
       - R2_BUCKET=${R2_BUCKET}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - POSTHOG_API_KEY=${POSTHOG_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,9 +105,9 @@ services:
     networks:
       - layercake-network
 
-  # PostgreSQL Database
+  # PostgreSQL Database with pgvector
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-layercake}
       - POSTGRES_USER=${POSTGRES_USER:-layercake}
@@ -133,9 +138,61 @@ services:
     networks:
       - layercake-network
 
+  # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    networks:
+      - layercake-network
+
+  # Grafana for dashboards
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/layercake-overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./backend/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./docker/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - layercake-network
+
+  # Tempo for distributed tracing
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes:
+      - ./docker/tempo/tempo.yml:/etc/tempo.yml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "4318:4318"  # OTLP HTTP
+      - "3200:3200"  # Tempo API
+    restart: unless-stopped
+    networks:
+      - layercake-network
+
 volumes:
   postgres_data:
   redis_data:
+  prometheus_data:
+  grafana_data:
+  tempo_data:
 
 networks:
   layercake-network:

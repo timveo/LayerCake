@@ -3,6 +3,7 @@ import { InjectQueue, Process, Processor } from '@nestjs/bull';
 import { Queue, Job } from 'bull';
 import { AgentExecutionService } from '../agents/services/agent-execution.service';
 import { AgentJob } from './queue-manager.service';
+import { MetricsService } from '../observability/metrics.service';
 
 /**
  * AgentWorkerService - Worker Processes for Agent Execution
@@ -25,6 +26,7 @@ export class AgentWorkerService implements OnModuleInit {
     @InjectQueue('agents-medium') private mediumQueue: Queue,
     @InjectQueue('agents-low') private lowQueue: Queue,
     private readonly agentExecution: AgentExecutionService,
+    private readonly metrics: MetricsService,
   ) {}
 
   onModuleInit() {
@@ -99,6 +101,21 @@ export class AgentWorkerService implements OnModuleInit {
       // Update job progress
       await job.progress(100);
 
+      // Track metrics
+      this.metrics.trackAgentExecution(
+        job.data.agentType,
+        job.data.model || 'unknown',
+        duration / 1000, // Convert to seconds
+        true,
+        result.inputTokens || 0,
+        result.outputTokens || 0,
+        result.cost || 0,
+      );
+
+      this.metrics.queueProcessingDuration
+        .labels(priority.toLowerCase(), job.data.agentType)
+        .observe(duration / 1000);
+
       return {
         success: true,
         agentId: result.id,
@@ -114,6 +131,19 @@ export class AgentWorkerService implements OnModuleInit {
 
       // Update job progress
       await job.progress(0);
+
+      // Track failure metrics
+      this.metrics.trackAgentExecution(
+        job.data.agentType,
+        job.data.model || 'unknown',
+        duration / 1000,
+        false,
+        0,
+        0,
+        0,
+      );
+
+      this.metrics.errors.labels('agent_execution', 'error').inc();
 
       throw error; // BullMQ will handle retries
     }

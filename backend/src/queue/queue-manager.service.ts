@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue, Job } from 'bull';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { MetricsService } from '../observability/metrics.service';
 
 export interface AgentJob {
   id: string;
@@ -38,6 +39,7 @@ export class QueueManagerService {
     @InjectQueue('agents-medium') private mediumQueue: Queue,
     @InjectQueue('agents-low') private lowQueue: Queue,
     private readonly prisma: PrismaService,
+    private readonly metrics: MetricsService,
   ) {}
 
   /**
@@ -78,7 +80,27 @@ export class QueueManagerService {
       },
     });
 
+    // Update queue depth metrics
+    await this.updateQueueMetrics();
+
     return bullJob;
+  }
+
+  /**
+   * Update queue depth metrics
+   */
+  private async updateQueueMetrics(): Promise<void> {
+    const stats = await this.getQueueStats();
+
+    // Update metrics for each priority level
+    this.metrics.updateQueueDepth('critical', 'waiting', stats.critical.waiting);
+    this.metrics.updateQueueDepth('critical', 'active', stats.critical.active);
+    this.metrics.updateQueueDepth('high', 'waiting', stats.high.waiting);
+    this.metrics.updateQueueDepth('high', 'active', stats.high.active);
+    this.metrics.updateQueueDepth('medium', 'waiting', stats.medium.waiting);
+    this.metrics.updateQueueDepth('medium', 'active', stats.medium.active);
+    this.metrics.updateQueueDepth('low', 'waiting', stats.low.waiting);
+    this.metrics.updateQueueDepth('low', 'active', stats.low.active);
   }
 
   /**

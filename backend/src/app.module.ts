@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './common/prisma/prisma.module';
@@ -37,6 +38,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { ObservabilityModule } from './observability/observability.module';
 import { StorageModule } from './storage/storage.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { envValidationSchema } from './config/env.validation';
 
 @Module({
   imports: [
@@ -44,9 +46,20 @@ import { AnalyticsModule } from './analytics/analytics.module';
     ObservabilityModule,
     StorageModule,
     AnalyticsModule,
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 60 seconds
+        limit: 100, // 100 requests per minute
+      },
+    ]),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '../.env',
+      validationSchema: envValidationSchema,
+      validationOptions: {
+        abortEarly: false,
+        allowUnknown: true,
+      },
     }),
     PrismaModule,
     AuthModule,
@@ -84,6 +97,10 @@ import { AnalyticsModule } from './analytics/analytics.module';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
     },
   ],
 })

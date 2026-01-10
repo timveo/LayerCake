@@ -14,6 +14,9 @@ import {
 import { ExecuteAgentDto } from '../dto/execute-agent.dto';
 import { getAgentTemplate } from '../templates';
 import { DocumentsService } from '../../documents/documents.service';
+import { CodeParserService } from '../../code-generation/code-parser.service';
+import { FileSystemService } from '../../code-generation/filesystem.service';
+import { BuildExecutorService } from '../../code-generation/build-executor.service';
 
 @Injectable()
 export class AgentExecutionService {
@@ -22,6 +25,9 @@ export class AgentExecutionService {
     private templateLoader: AgentTemplateLoaderService,
     private aiProvider: AIProviderService,
     private documentsService: DocumentsService,
+    private codeParser: CodeParserService,
+    private filesystem: FileSystemService,
+    private buildExecutor: BuildExecutorService,
   ) {}
 
   async executeAgent(
@@ -455,7 +461,7 @@ ${template.prompt.context}
   }
 
   /**
-   * Post-process agent completion: Generate documents and prepare handoffs
+   * Post-process agent completion: Generate documents, extract code files, and prepare handoffs
    */
   private async postProcessAgentCompletion(
     agentExecutionId: string,
@@ -477,7 +483,131 @@ ${template.prompt.context}
       console.error('Document generation error:', error);
     }
 
-    // 2. Extract handoff data
+    // 2. Extract and write code files (NEW)
+    const codeGenerationAgents = [
+      'frontend-developer',
+      'backend-developer',
+      'ml-engineer',
+      'data-engineer',
+      'devops-engineer',
+    ];
+
+    if (codeGenerationAgents.includes(agentType)) {
+      try {
+        // Parse code blocks from agent output
+        const extractionResult = this.codeParser.extractFiles(agentOutput);
+
+        if (extractionResult.files.length > 0) {
+          console.log(
+            `[${agentType}] Extracted ${extractionResult.files.length} code files`,
+          );
+
+          // Ensure project workspace exists
+          await this.filesystem.initializeWorkspace(projectId);
+
+          // Write all extracted files
+          for (const file of extractionResult.files) {
+            await this.filesystem.writeFile(projectId, file.path, file.content);
+            console.log(`[${agentType}] Wrote file: ${file.path}`);
+          }
+
+          // Record extracted files in agent execution metadata
+          await this.prisma.agent.update({
+            where: { id: agentExecutionId },
+            data: {
+              contextData: {
+                ...(await this.prisma.agent.findUnique({
+                  where: { id: agentExecutionId },
+                  select: { contextData: true },
+                })).contextData,
+                filesGenerated: extractionResult.files.map((f) => f.path),
+              } as any,
+            },
+          });
+
+          // If this is a gate-critical agent (G5 Development), run validation
+          const project = await this.prisma.project.findUnique({
+            where: { id: projectId },
+            include: { state: true },
+          });
+
+          if (
+            project?.state?.currentGate === 'G5_PENDING' &&
+            (agentType === 'frontend-developer' || agentType === 'backend-developer')
+          ) {
+            console.log(
+              `[${agentType}] Running build validation for G5 gate...`,
+            );
+
+            try {
+              // Run full validation pipeline
+              const validationResult =
+                await this.buildExecutor.runFullValidation(projectId);
+
+              // Create proof artifact with build results
+              await this.prisma.proofArtifact.create({
+                data: {
+                  projectId,
+                  gateId: await this.getGateId(projectId, 'G5_PENDING'),
+                  artifactType: validationResult.overallSuccess
+                    ? 'BUILD_OUTPUT'
+                    : 'BUILD_ERROR',
+                  filePath: `builds/${agentType}-validation.json`,
+                  metadata: {
+                    agentType,
+                    agentExecutionId,
+                    validationResult,
+                    filesGenerated: extractionResult.files.map((f) => f.path),
+                  } as any,
+                  validatedAt: validationResult.overallSuccess
+                    ? new Date()
+                    : null,
+                },
+              });
+
+              console.log(
+                `[${agentType}] Validation ${validationResult.overallSuccess ? 'PASSED' : 'FAILED'}`,
+              );
+
+              // If validation failed, create error history entry
+              if (!validationResult.overallSuccess) {
+                const errors = [
+                  ...validationResult.build.errors,
+                  ...validationResult.tests.errors,
+                  ...validationResult.lint.errors,
+                ];
+
+                for (const error of errors.slice(0, 5)) {
+                  // Limit to 5 errors
+                  await this.prisma.errorHistory.create({
+                    data: {
+                      projectId,
+                      agentId: agentExecutionId,
+                      errorType: 'build_error',
+                      errorMessage: error,
+                      context: {
+                        agentType,
+                        validationPhase: 'build',
+                      } as any,
+                    },
+                  });
+                }
+              }
+            } catch (error) {
+              console.error('Build validation error:', error);
+            }
+          }
+        } else {
+          console.log(
+            `[${agentType}] No code files extracted from output (${extractionResult.unparsedBlocks} unparsed blocks)`,
+          );
+        }
+      } catch (error) {
+        console.error('Code extraction error:', error);
+      }
+    }
+
+    // 3. Extract handoff data
     const handoffData = this.documentsService.extractHandoffData(agentOutput);
 
     if (handoffData && handoffData.nextAgent?.length > 0) {
@@ -533,7 +663,7 @@ ${template.prompt.context}
       }
     }
 
-    // 3. Update task status if this agent was assigned a task
+    // 4. Update task status if this agent was assigned a task
     try {
       await this.prisma.task.updateMany({
         where: {
@@ -549,5 +679,19 @@ ${template.prompt.context}
     } catch (error) {
       console.error('Task update error:', error);
     }
+  }
+
+  /**
+   * Helper method to get gate ID by gate type
+   */
+  private async getGateId(projectId: string, gateType: string): Promise<string> {
+    const gate = await this.prisma.gate.findFirst({
+      where: {
+        projectId,
+        gateType,
+      },
+    });
+
+    return gate?.id || null;
   }
 }

@@ -1138,28 +1138,13 @@ const CodeContent = ({ theme }: { theme: ThemeMode }) => {
 
 const JourneyContent = ({ theme }: { theme: ThemeMode }) => {
   const isDark = theme === 'dark';
-  const currentGate = 3; // Current gate for this view
+  const currentGate = 3;
 
-  // Phase colors
-  const phaseColors: Record<Phase, { bg: string; border: string; text: string; accent: string }> = {
-    plan: {
-      bg: 'from-violet-500/20 to-purple-500/10',
-      border: 'border-violet-500/40',
-      text: 'text-violet-300',
-      accent: 'bg-violet-500'
-    },
-    dev: {
-      bg: 'from-cyan-500/20 to-blue-500/10',
-      border: 'border-cyan-500/40',
-      text: 'text-cyan-300',
-      accent: 'bg-cyan-500'
-    },
-    ship: {
-      bg: 'from-orange-500/20 to-amber-500/10',
-      border: 'border-orange-500/40',
-      text: 'text-orange-300',
-      accent: 'bg-orange-500'
-    }
+  // Phase colors for timeline
+  const phaseColors: Record<Phase, { bg: string; border: string; text: string; glow: string }> = {
+    plan: { bg: 'bg-violet-500', border: 'border-violet-500/30', text: 'text-violet-300', glow: 'shadow-violet-500/20' },
+    dev: { bg: 'bg-cyan-500', border: 'border-cyan-500/30', text: 'text-cyan-300', glow: 'shadow-cyan-500/20' },
+    ship: { bg: 'bg-orange-500', border: 'border-orange-500/30', text: 'text-orange-300', glow: 'shadow-orange-500/20' },
   };
 
   const getPhaseForGate = (gate: number): Phase => {
@@ -1173,142 +1158,138 @@ const JourneyContent = ({ theme }: { theme: ThemeMode }) => {
 
   return (
     <div className="h-full overflow-auto">
-      {/* Hero Header */}
+      {/* Header */}
       <div className="text-center mb-6">
-        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-          <h3 className="text-xl font-bold bg-gradient-to-r from-violet-300 via-cyan-400 to-orange-300 bg-clip-text text-transparent mb-1">
-            Your Building Journey
-          </h3>
-          <p className="text-xs text-teal-400">All 10 gates from idea to launch</p>
-        </motion.div>
-
-        {/* Progress bar */}
-        <div className="mt-3 max-w-md mx-auto">
-          <div className="flex justify-between text-[10px] mb-1">
-            <span className="text-violet-400">Plan</span>
-            <span className="text-cyan-400">Build</span>
-            <span className="text-orange-400">Ship</span>
-          </div>
-          <div className={`h-2 rounded-full overflow-hidden flex ${isDark ? 'bg-slate-700/50' : 'bg-teal-800/50'}`}>
-            <div className="w-[40%] bg-gradient-to-r from-violet-500 to-violet-400" style={{ opacity: currentGate >= 0 ? 1 : 0.3 }} />
-            <div className="w-[30%] bg-gradient-to-r from-cyan-500 to-cyan-400" style={{ opacity: currentGate >= 4 ? 1 : 0.3 }} />
-            <div className="w-[30%] bg-gradient-to-r from-orange-500 to-orange-400" style={{ opacity: currentGate >= 7 ? 1 : 0.3 }} />
-          </div>
-          <div className="text-right text-[10px] mt-1 text-emerald-400 font-bold">{progress}% Complete</div>
-        </div>
+        <h3 className="text-lg font-bold bg-gradient-to-r from-violet-300 via-cyan-400 to-orange-300 bg-clip-text text-transparent">
+          Your Building Journey
+        </h3>
+        <p className="text-[10px] text-slate-400 mt-1">{progress}% Complete • Gate {currentGate} of 9</p>
       </div>
 
-      {/* Gate Cards - All 10 gates */}
-      <div className="space-y-3 px-2">
-        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((gateNum) => {
-          const gateInfo = GATE_INFO[gateNum];
-          const phase = getPhaseForGate(gateNum);
-          const colors = phaseColors[phase];
-          const isCompleted = gateNum < currentGate;
-          const isCurrent = gateNum === currentGate;
-          const isUpcoming = gateNum > currentGate;
+      {/* Alternating Timeline */}
+      <div className="relative px-2">
+        {/* Central vertical line */}
+        <div className={`absolute left-1/2 top-0 bottom-0 w-0.5 transform -translate-x-1/2 ${isDark ? 'bg-slate-700/50' : 'bg-teal-700/30'}`} />
 
-          return (
-            <motion.div
-              key={gateNum}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: gateNum * 0.05 }}
-              className={`rounded-2xl border p-4 transition-all ${
-                isCompleted
-                  ? `bg-gradient-to-r ${colors.bg} ${colors.border} shadow-md`
-                  : isCurrent
-                  ? `bg-gradient-to-r ${colors.bg} ${colors.border} shadow-lg ring-2 ring-offset-2 ring-offset-slate-900 ${colors.border.replace('border-', 'ring-')}`
-                  : `${isDark ? 'bg-slate-800/20 border-slate-700/30' : 'bg-teal-900/20 border-teal-700/30'} opacity-50`
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                {/* Gate badge */}
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${
-                  isCompleted || isCurrent ? `${colors.accent} text-white shadow-md` : 'bg-slate-700/50 text-teal-500'
-                }`}>
-                  G{gateNum}
-                </div>
+        {/* Progress overlay on central line */}
+        <div
+          className="absolute left-1/2 top-0 w-0.5 transform -translate-x-1/2 bg-gradient-to-b from-violet-500 via-cyan-500 to-transparent transition-all duration-500"
+          style={{ height: `${Math.min(95, (currentGate / 9) * 100)}%` }}
+        />
 
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h4 className={`font-bold text-sm ${isCompleted || isCurrent ? colors.text : 'text-teal-500'}`}>
+        {/* Milestone nodes - alternating left/right */}
+        <div className="space-y-3">
+          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((gateNum) => {
+            const gateInfo = GATE_INFO[gateNum];
+            const phase = getPhaseForGate(gateNum);
+            const colors = phaseColors[phase];
+            const isCompleted = gateNum < currentGate;
+            const isCurrent = gateNum === currentGate;
+            const isUpcoming = gateNum > currentGate;
+            const isLeft = gateNum % 2 === 0;
+
+            return (
+              <div key={gateNum} className={`flex items-center gap-2 ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}>
+                {/* Content Card */}
+                <motion.div
+                  initial={{ opacity: 0, x: isLeft ? -20 : 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: gateNum * 0.05 }}
+                  className={`flex-1 ${isLeft ? 'text-right' : 'text-left'}`}
+                >
+                  <div className={`
+                    p-3 rounded-xl border transition-all
+                    ${isCompleted
+                      ? `bg-gradient-to-br ${isLeft ? 'from-emerald-500/10 to-transparent' : 'from-transparent to-emerald-500/10'} border-emerald-500/30`
+                      : isCurrent
+                        ? `bg-gradient-to-br ${isLeft ? `from-${phase === 'plan' ? 'violet' : phase === 'dev' ? 'cyan' : 'orange'}-500/20 to-transparent` : `from-transparent to-${phase === 'plan' ? 'violet' : phase === 'dev' ? 'cyan' : 'orange'}-500/20`} ${colors.border} shadow-lg ${colors.glow}`
+                        : `${isDark ? 'bg-slate-800/20' : 'bg-teal-900/20'} border-slate-700/20 opacity-50`
+                    }
+                  `}>
+                    {isCompleted && (
+                      <div className={`flex items-center gap-1 mb-1 ${isLeft ? 'justify-end' : 'justify-start'}`}>
+                        <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
+                          ✓ Complete
+                        </span>
+                      </div>
+                    )}
+                    <h4 className={`text-xs font-bold mb-0.5 ${
+                      isCompleted ? 'text-emerald-400' : isCurrent ? colors.text : 'text-slate-500'
+                    }`}>
                       {gateInfo.name}
                     </h4>
-                    {isCompleted && <CheckIcon className="w-4 h-4 text-emerald-400" />}
-                    {isCurrent && (
-                      <motion.span
-                        animate={{ opacity: [1, 0.5, 1] }}
-                        transition={{ duration: 2, repeat: Infinity }}
-                        className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/20 text-white"
-                      >
-                        Current
-                      </motion.span>
+                    <p className={`text-[9px] leading-relaxed ${isUpcoming ? 'text-slate-600' : 'text-slate-400'}`}>
+                      {gateInfo.description}
+                    </p>
+                    {(isCompleted || isCurrent) && gateInfo.deliverables.length > 0 && (
+                      <div className={`flex flex-wrap gap-1 mt-1.5 ${isLeft ? 'justify-end' : 'justify-start'}`}>
+                        {gateInfo.deliverables.slice(0, 2).map((item, i) => (
+                          <span
+                            key={i}
+                            className={`text-[7px] px-1 py-0.5 rounded ${
+                              isCompleted ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-slate-300'
+                            }`}
+                          >
+                            {item}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  <p className={`text-[11px] mb-2 ${isUpcoming ? 'text-teal-600' : 'text-teal-300/80'}`}>
-                    {gateInfo.description}
-                  </p>
+                </motion.div>
 
-                  {/* Deliverables */}
-                  {!isUpcoming && (
-                    <div className="flex flex-wrap gap-1">
-                      {gateInfo.deliverables.map((item, i) => (
-                        <span
-                          key={i}
-                          className={`text-[9px] px-1.5 py-0.5 rounded ${
-                            isCompleted
-                              ? 'bg-emerald-500/20 text-emerald-300'
-                              : 'bg-white/10 text-teal-300'
-                          }`}
-                        >
-                          {isCompleted && '✓ '}{item}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {isUpcoming && (
-                    <div className="flex flex-wrap gap-1">
-                      {gateInfo.deliverables.slice(0, 3).map((item, i) => (
-                        <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700/30 text-teal-500">
-                          {item}
-                        </span>
-                      ))}
-                      {gateInfo.deliverables.length > 3 && (
-                        <span className="text-[9px] px-1.5 py-0.5 text-teal-600">
-                          +{gateInfo.deliverables.length - 3} more
-                        </span>
-                      )}
-                    </div>
-                  )}
+                {/* Center Node */}
+                <div className="relative flex flex-col items-center z-10">
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ delay: gateNum * 0.05, type: 'spring' }}
+                    className={`
+                      w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold border-2
+                      ${isCompleted
+                        ? 'bg-emerald-500 border-emerald-400/50 text-white'
+                        : isCurrent
+                          ? `${colors.bg} border-white/30 text-white ring-2 ring-offset-1 ring-offset-slate-900 ring-${phase === 'plan' ? 'violet' : phase === 'dev' ? 'cyan' : 'orange'}-500/50`
+                          : `${isDark ? 'bg-slate-800' : 'bg-teal-900'} border-slate-600 text-slate-500`
+                      }
+                    `}
+                  >
+                    {isCompleted ? <CheckIcon className="w-3.5 h-3.5" /> : `G${gateNum}`}
+                  </motion.div>
                 </div>
 
-                {/* Phase indicator */}
-                <div className={`text-[9px] px-2 py-1 rounded-full ${colors.accent}/20 ${colors.text} font-medium shrink-0`}>
-                  {phase.charAt(0).toUpperCase() + phase.slice(1)}
-                </div>
+                {/* Spacer for alternating layout */}
+                <div className="flex-1" />
               </div>
-            </motion.div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
 
-      {/* Launch celebration at bottom */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5 }}
-        className="text-center py-6"
-      >
-        <div className="text-2xl mb-1">🚀</div>
-        <p className="text-xs text-teal-400">Launch awaits!</p>
-      </motion.div>
+        {/* Launch destination at bottom */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="flex justify-center mt-4"
+        >
+          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-orange-500/20 to-amber-500/20 border border-orange-500/30">
+            <span className="text-lg">🚀</span>
+            <span className="text-xs font-bold text-orange-300">Launch!</span>
+          </div>
+        </motion.div>
+      </div>
     </div>
   );
 };
 
 // ============ RIGHT PANEL COMPONENTS ============
+
+// Phase colors for right panel components
+const PHASE_COLORS: Record<Phase, { bg: string; bgHover: string; text: string; accent: string; border: string }> = {
+  plan: { bg: 'bg-violet-500', bgHover: 'hover:bg-violet-500/40', text: 'text-violet-300', accent: 'bg-violet-500/20', border: 'border-violet-500/30' },
+  dev: { bg: 'bg-cyan-500', bgHover: 'hover:bg-cyan-500/40', text: 'text-cyan-300', accent: 'bg-cyan-500/20', border: 'border-cyan-500/30' },
+  ship: { bg: 'bg-orange-500', bgHover: 'hover:bg-orange-500/40', text: 'text-orange-300', accent: 'bg-orange-500/20', border: 'border-orange-500/30' },
+};
 
 // Phase selector - updates the displayed phase in right panel (no popup)
 const PhaseSelector = ({ currentPhase, selectedPhase, onPhaseSelect, theme }: {
@@ -1325,26 +1306,29 @@ const PhaseSelector = ({ currentPhase, selectedPhase, onPhaseSelect, theme }: {
 
   return (
     <Panel theme={theme} className="p-3">
-      <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 px-1 text-teal-400">Phase</h3>
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 px-1 text-slate-400">Phase</h3>
       <div className="flex gap-1.5">
-        {phases.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => onPhaseSelect(p.id)}
-            className={`flex-1 text-center py-2 px-2 rounded-xl transition-all cursor-pointer ${
-              selectedPhase === p.id
-                ? 'bg-teal-500 shadow-md'
-                : currentPhase === p.id
-                  ? 'bg-teal-500/30 ring-1 ring-teal-500/50'
-                  : 'bg-slate-700/30 hover:bg-slate-700/50'
-            }`}
-          >
-            <div className={`text-xs font-medium ${selectedPhase === p.id ? 'text-white' : 'text-teal-400'}`}>{p.label}</div>
-          </button>
-        ))}
+        {phases.map((p) => {
+          const colors = PHASE_COLORS[p.id];
+          return (
+            <button
+              key={p.id}
+              onClick={() => onPhaseSelect(p.id)}
+              className={`flex-1 text-center py-2 px-2 rounded-xl transition-all cursor-pointer ${
+                selectedPhase === p.id
+                  ? `${colors.bg} shadow-md`
+                  : currentPhase === p.id
+                    ? `${colors.accent} ring-1 ${colors.border}`
+                    : `bg-slate-700/30 ${colors.bgHover}`
+              }`}
+            >
+              <div className={`text-xs font-medium ${selectedPhase === p.id ? 'text-white' : colors.text}`}>{p.label}</div>
+            </button>
+          );
+        })}
       </div>
       {selectedPhase !== currentPhase && (
-        <p className="text-[9px] text-teal-500 mt-2 text-center">Viewing {selectedPhase} phase</p>
+        <p className={`text-[9px] ${PHASE_COLORS[selectedPhase].text} mt-2 text-center`}>Viewing {selectedPhase} phase</p>
       )}
     </Panel>
   );
@@ -1354,27 +1338,28 @@ const PhaseSelector = ({ currentPhase, selectedPhase, onPhaseSelect, theme }: {
 const TeamPanel = ({ phase, theme: _theme }: { phase: Phase; theme: ThemeMode }) => {
   const phaseAgents = ALL_AGENTS.filter(a => a.phase === phase);
   const activeCount = phaseAgents.filter(a => a.status === 'working').length;
+  const colors = PHASE_COLORS[phase];
 
   return (
     <div className="px-3 py-2">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-teal-400">
+        <h3 className={`text-[10px] font-semibold uppercase tracking-wider ${colors.text}`}>
           Team
         </h3>
-        <span className="text-[9px] bg-teal-500 text-white px-2 py-0.5 rounded-full">{activeCount} active</span>
+        <span className={`text-[9px] ${colors.bg} text-white px-2 py-0.5 rounded-full`}>{activeCount} active</span>
       </div>
       <div className="space-y-1">
         {phaseAgents.map((agent) => (
           <div
             key={agent.type}
             className={`flex items-center gap-2 p-1.5 rounded-lg ${
-              agent.status === 'working' ? 'bg-teal-500/20' : 'bg-slate-700/20'
+              agent.status === 'working' ? colors.accent : 'bg-slate-700/20'
             }`}
           >
-            <span className={`text-[10px] flex-1 ${agent.status === 'working' ? 'text-white' : 'text-teal-400'}`}>
+            <span className={`text-[10px] flex-1 ${agent.status === 'working' ? 'text-white' : colors.text}`}>
               {agent.name}
             </span>
-            {agent.status === 'working' && <BreathingOrb color="bg-teal-400" size="sm" />}
+            {agent.status === 'working' && <BreathingOrb color={colors.bg} size="sm" />}
           </div>
         ))}
       </div>
@@ -1383,18 +1368,18 @@ const TeamPanel = ({ phase, theme: _theme }: { phase: Phase; theme: ThemeMode })
 };
 
 // Gates panel - vertical layout with gate name on right
-const GatesPanel = ({ currentGate, selectedPhase, theme, onGateClick }: {
+const GatesPanel = ({ currentGate, selectedPhase, theme: _theme, onGateClick }: {
   currentGate: number;
   selectedPhase: Phase;
   theme: ThemeMode;
   onGateClick: (gate: number) => void
 }) => {
   const phaseGates = GATES_BY_PHASE[selectedPhase];
-  const isDark = theme === 'dark';
+  const colors = PHASE_COLORS[selectedPhase];
 
   return (
     <div className="px-3 py-2">
-      <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">
+      <h3 className={`text-[10px] font-semibold uppercase tracking-wider mb-2 ${colors.text}`}>
         Gates
       </h3>
       <div className="space-y-1.5">
@@ -1410,26 +1395,26 @@ const GatesPanel = ({ currentGate, selectedPhase, theme, onGateClick }: {
                 isCompleted
                   ? 'bg-emerald-500/20 border border-emerald-500/30'
                   : isCurrent
-                    ? `${isDark ? 'bg-amber-500/20' : 'bg-amber-500/30'} border border-amber-500/50 cursor-pointer hover:bg-amber-500/30`
+                    ? `${colors.accent} border ${colors.border} cursor-pointer ${colors.bgHover}`
                     : 'bg-slate-700/20 border border-transparent'
               }`}
             >
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
                 isCompleted ? 'bg-emerald-500 text-white' :
-                isCurrent ? 'bg-amber-500 text-white' :
-                'bg-slate-700/50 text-teal-500'
+                isCurrent ? `${colors.bg} text-white` :
+                `bg-slate-700/50 ${colors.text}`
               }`}>
                 G{gateNum}
               </div>
               <div className="flex-1 text-left">
                 <div className={`text-[10px] font-medium ${
-                  isCompleted ? 'text-emerald-400' : isCurrent ? 'text-amber-300' : 'text-teal-500'
+                  isCompleted ? 'text-emerald-400' : isCurrent ? colors.text : 'text-slate-500'
                 }`}>
                   {gateInfo.name}
                 </div>
               </div>
               {isCompleted && <CheckIcon className="w-4 h-4 text-emerald-400" />}
-              {isCurrent && <span className="text-[8px] text-amber-400">Review</span>}
+              {isCurrent && <span className={`text-[8px] ${colors.text}`}>Review</span>}
             </button>
           );
         })}
@@ -1440,19 +1425,22 @@ const GatesPanel = ({ currentGate, selectedPhase, theme, onGateClick }: {
 
 // Costs panel - vertical layout with gate, phase, and total
 const CostsPanel = ({ selectedPhase, theme: _theme }: { selectedPhase: Phase; theme: ThemeMode }) => {
+  const colors = PHASE_COLORS[selectedPhase];
+  const phaseLabel = selectedPhase === 'dev' ? 'Build' : selectedPhase.charAt(0).toUpperCase() + selectedPhase.slice(1);
+
   return (
     <div className="px-3 py-2">
-      <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">
+      <h3 className={`text-[10px] font-semibold uppercase tracking-wider mb-2 ${colors.text}`}>
         Token Costs
       </h3>
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between p-2 rounded-xl bg-teal-500/10">
-          <span className="text-[10px] text-teal-400">Current Gate</span>
-          <span className="text-sm font-bold text-teal-300">{COST_DATA.gate}</span>
+        <div className={`flex items-center justify-between p-2 rounded-xl ${colors.accent}`}>
+          <span className={`text-[10px] ${colors.text}`}>Current Gate</span>
+          <span className={`text-sm font-bold ${colors.text}`}>{COST_DATA.gate}</span>
         </div>
-        <div className="flex items-center justify-between p-2 rounded-xl bg-teal-500/10">
-          <span className="text-[10px] text-teal-400">{selectedPhase.charAt(0).toUpperCase() + selectedPhase.slice(1)} Phase</span>
-          <span className="text-sm font-bold text-teal-300">{COST_DATA[selectedPhase]}</span>
+        <div className={`flex items-center justify-between p-2 rounded-xl ${colors.accent}`}>
+          <span className={`text-[10px] ${colors.text}`}>{phaseLabel} Phase</span>
+          <span className={`text-sm font-bold ${colors.text}`}>{COST_DATA[selectedPhase]}</span>
         </div>
         <div className="flex items-center justify-between p-2 rounded-xl bg-emerald-500/10">
           <span className="text-[10px] text-emerald-400">Project Total</span>

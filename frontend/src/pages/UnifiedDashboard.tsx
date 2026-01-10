@@ -8,7 +8,6 @@ import {
   StopIcon,
   SparklesIcon,
   CpuChipIcon,
-  BanknotesIcon,
   CheckCircleIcon,
   ClockIcon,
   BoltIcon,
@@ -50,17 +49,6 @@ interface FileTreeNode {
   content?: string;
 }
 
-interface JourneyMilestone {
-  id: string;
-  title: string;
-  description: string;
-  status: 'completed' | 'current' | 'upcoming';
-  gate: string;
-  insights: string[];
-  celebration?: string;
-  achievements?: string[];
-}
-
 interface GateApprovalData {
   gateNumber: number;
   title: string;
@@ -100,12 +88,29 @@ const GATES_BY_PHASE: Record<Phase, number[]> = {
   ship: [7, 8, 9],
 };
 
-// Phase costs (mock data)
-const PHASE_COSTS: Record<Phase, { current: string; total: string }> = {
-  plan: { current: '$0.45', total: '$1.20' },
-  dev: { current: '$0.00', total: '$0.80' },
-  ship: { current: '$0.00', total: '$0.30' },
+// Gate names and descriptions
+const GATE_INFO: Record<number, { name: string; description: string; deliverables: string[] }> = {
+  0: { name: 'Idea Validation', description: 'Define problem and validate solution approach', deliverables: ['Problem statement', 'Target users defined', 'Initial concept validated'] },
+  1: { name: 'PRD Complete', description: 'Product requirements fully documented', deliverables: ['PRD document', 'User stories', 'Success metrics', 'Feature prioritization'] },
+  2: { name: 'Architecture Design', description: 'System architecture planned and reviewed', deliverables: ['System design doc', 'Tech stack decision', 'Database schema', 'API contracts'] },
+  3: { name: 'Design Approved', description: 'UX/UI design completed and approved', deliverables: ['Wireframes', 'Design system', 'User flows', 'Prototype'] },
+  4: { name: 'Core MVP', description: 'Minimum viable product functionality built', deliverables: ['Core features', 'Basic UI', 'Database setup', 'API endpoints'] },
+  5: { name: 'Feature Complete', description: 'All planned features implemented', deliverables: ['All features built', 'Integration complete', 'Error handling', 'Edge cases covered'] },
+  6: { name: 'Integration Done', description: 'All systems integrated and working together', deliverables: ['Third-party integrations', 'Service connections', 'Data pipelines', 'Authentication flow'] },
+  7: { name: 'Testing Complete', description: 'Comprehensive testing passed', deliverables: ['Unit tests', 'Integration tests', 'E2E tests', 'Performance tests', 'Security audit'] },
+  8: { name: 'Deploy Ready', description: 'Production environment prepared', deliverables: ['CI/CD pipeline', 'Monitoring setup', 'Logging configured', 'Backup strategy'] },
+  9: { name: 'Launch', description: 'Product successfully launched', deliverables: ['Production deployment', 'User onboarding', 'Documentation', 'Support process'] },
 };
+
+// Costs (mock data) - now includes gate, phase, and total
+const COST_DATA = {
+  gate: '$0.45',
+  plan: '$1.20',
+  dev: '$0.80',
+  ship: '$0.30',
+  total: '$2.30',
+};
+
 
 // Mock data
 const mockMessages: ChatMessage[] = [
@@ -1133,320 +1138,185 @@ const CodeContent = ({ theme }: { theme: ThemeMode }) => {
 
 const JourneyContent = ({ theme }: { theme: ThemeMode }) => {
   const isDark = theme === 'dark';
-  const milestones: JourneyMilestone[] = [
-    { id: '1', title: 'Vision Defined', description: 'You defined what you\'re building and why it matters.', status: 'completed', gate: 'G0-G1', insights: ['Clear problem statement', 'Target users identified'], celebration: '🎯 Vision Set!', achievements: ['PRD drafted', 'User stories complete'] },
-    { id: '2', title: 'Architecture Emerges', description: 'System skeleton took form with solid foundations.', status: 'completed', gate: 'G2-G3', insights: ['Scalable design chosen', 'Tech stack finalized'], celebration: '🏗️ Foundations!', achievements: ['System design approved', 'Database schema ready'] },
-    { id: '3', title: 'Design Takes Shape', description: 'Look and feel being crafted with care.', status: 'current', gate: 'G4', insights: ['User flows mapped'], achievements: ['Wireframes complete', 'Design system started'] },
-    { id: '4', title: 'Core Development', description: 'Building essential features that power your app.', status: 'upcoming', gate: 'G5-G6', insights: [] },
-    { id: '5', title: 'Quality Assured', description: 'Testing and validation for confidence.', status: 'upcoming', gate: 'G7', insights: [] },
-    { id: '6', title: 'Ready to Ship', description: 'Deployment preparation and launch!', status: 'upcoming', gate: 'G8-G9', insights: [] },
-  ];
+  const currentGate = 3; // Current gate for this view
 
-  const completedCount = milestones.filter(m => m.status === 'completed').length;
-  const progress = Math.round((completedCount / milestones.length) * 100);
+  // Phase colors
+  const phaseColors: Record<Phase, { bg: string; border: string; text: string; accent: string }> = {
+    plan: {
+      bg: 'from-violet-500/20 to-purple-500/10',
+      border: 'border-violet-500/40',
+      text: 'text-violet-300',
+      accent: 'bg-violet-500'
+    },
+    dev: {
+      bg: 'from-cyan-500/20 to-blue-500/10',
+      border: 'border-cyan-500/40',
+      text: 'text-cyan-300',
+      accent: 'bg-cyan-500'
+    },
+    ship: {
+      bg: 'from-orange-500/20 to-amber-500/10',
+      border: 'border-orange-500/40',
+      text: 'text-orange-300',
+      accent: 'bg-orange-500'
+    }
+  };
+
+  const getPhaseForGate = (gate: number): Phase => {
+    if (gate <= 3) return 'plan';
+    if (gate <= 6) return 'dev';
+    return 'ship';
+  };
+
+  const completedGates = currentGate;
+  const progress = Math.round((completedGates / 10) * 100);
 
   return (
     <div className="h-full overflow-auto">
-      {/* Hero Header with gradient */}
-      <div className="text-center mb-6 relative">
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="inline-block"
-        >
-          <div className="text-4xl mb-2">🚀</div>
-          <h3 className="text-2xl font-bold bg-gradient-to-r from-teal-300 via-emerald-400 to-teal-300 bg-clip-text text-transparent mb-1">
+      {/* Hero Header */}
+      <div className="text-center mb-6">
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+          <h3 className="text-xl font-bold bg-gradient-to-r from-violet-300 via-cyan-400 to-orange-300 bg-clip-text text-transparent mb-1">
             Your Building Journey
           </h3>
-          <p className="text-sm text-teal-400">Every great product is a story worth telling</p>
+          <p className="text-xs text-teal-400">All 10 gates from idea to launch</p>
         </motion.div>
 
-        {/* Progress indicator */}
-        <div className="mt-4 max-w-xs mx-auto">
-          <div className="flex justify-between text-[10px] text-teal-400 mb-1">
-            <span>Progress</span>
-            <span className="font-bold text-emerald-400">{progress}%</span>
+        {/* Progress bar */}
+        <div className="mt-3 max-w-md mx-auto">
+          <div className="flex justify-between text-[10px] mb-1">
+            <span className="text-violet-400">Plan</span>
+            <span className="text-cyan-400">Build</span>
+            <span className="text-orange-400">Ship</span>
           </div>
-          <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/50' : 'bg-teal-800/50'}`}>
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 1, ease: 'easeOut' }}
-              className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 rounded-full"
-            />
+          <div className={`h-2 rounded-full overflow-hidden flex ${isDark ? 'bg-slate-700/50' : 'bg-teal-800/50'}`}>
+            <div className="w-[40%] bg-gradient-to-r from-violet-500 to-violet-400" style={{ opacity: currentGate >= 0 ? 1 : 0.3 }} />
+            <div className="w-[30%] bg-gradient-to-r from-cyan-500 to-cyan-400" style={{ opacity: currentGate >= 4 ? 1 : 0.3 }} />
+            <div className="w-[30%] bg-gradient-to-r from-orange-500 to-orange-400" style={{ opacity: currentGate >= 7 ? 1 : 0.3 }} />
           </div>
+          <div className="text-right text-[10px] mt-1 text-emerald-400 font-bold">{progress}% Complete</div>
         </div>
       </div>
 
-      {/* Journey Timeline */}
-      <div className="relative max-w-3xl mx-auto px-4">
-        {/* Animated gradient line */}
-        <div className="absolute left-1/2 top-0 bottom-0 w-1 transform -translate-x-1/2">
-          <div className="absolute inset-0 bg-gradient-to-b from-emerald-500 via-teal-500 to-slate-700 rounded-full" />
-          <motion.div
-            animate={{ y: [0, 20, 0] }}
-            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-            className="absolute top-0 w-full h-20 bg-gradient-to-b from-white/30 to-transparent rounded-full"
-          />
-        </div>
-
-        {milestones.map((milestone, index) => {
-          const isLeft = index % 2 === 0;
-          const delay = index * 0.1;
+      {/* Gate Cards - All 10 gates */}
+      <div className="space-y-3 px-2">
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((gateNum) => {
+          const gateInfo = GATE_INFO[gateNum];
+          const phase = getPhaseForGate(gateNum);
+          const colors = phaseColors[phase];
+          const isCompleted = gateNum < currentGate;
+          const isCurrent = gateNum === currentGate;
+          const isUpcoming = gateNum > currentGate;
 
           return (
             <motion.div
-              key={milestone.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay }}
-              className={`flex items-start gap-4 mb-6 ${isLeft ? 'flex-row' : 'flex-row-reverse'}`}
+              key={gateNum}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: gateNum * 0.05 }}
+              className={`rounded-2xl border p-4 transition-all ${
+                isCompleted
+                  ? `bg-gradient-to-r ${colors.bg} ${colors.border} shadow-md`
+                  : isCurrent
+                  ? `bg-gradient-to-r ${colors.bg} ${colors.border} shadow-lg ring-2 ring-offset-2 ring-offset-slate-900 ${colors.border.replace('border-', 'ring-')}`
+                  : `${isDark ? 'bg-slate-800/20 border-slate-700/30' : 'bg-teal-900/20 border-teal-700/30'} opacity-50`
+              }`}
             >
-              {/* Card */}
-              <motion.div
-                whileHover={{ scale: milestone.status !== 'upcoming' ? 1.02 : 1 }}
-                className={`flex-1 max-w-[280px] ${isLeft ? 'text-right' : 'text-left'}`}
-              >
-                <div className={`p-4 rounded-2xl border backdrop-blur-sm transition-all ${
-                  milestone.status === 'completed'
-                    ? 'bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border-emerald-500/40 shadow-lg shadow-emerald-500/10'
-                    : milestone.status === 'current'
-                    ? 'bg-gradient-to-br from-teal-500/30 to-cyan-500/20 border-teal-400/50 shadow-lg shadow-teal-500/20 ring-1 ring-teal-400/30'
-                    : isDark ? 'bg-slate-800/30 border-slate-700/30 opacity-50' : 'bg-teal-900/30 border-teal-700/30 opacity-50'
+              <div className="flex items-start gap-3">
+                {/* Gate badge */}
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${
+                  isCompleted || isCurrent ? `${colors.accent} text-white shadow-md` : 'bg-slate-700/50 text-teal-500'
                 }`}>
-                  {/* Celebration badge */}
-                  {milestone.celebration && milestone.status === 'completed' && (
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      className={`flex items-center gap-1 mb-2 ${isLeft ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-gradient-to-r from-emerald-500/30 to-teal-500/30 text-emerald-300 font-medium border border-emerald-500/30">
-                        {milestone.celebration}
-                      </span>
-                    </motion.div>
-                  )}
+                  G{gateNum}
+                </div>
 
-                  {/* Current indicator */}
-                  {milestone.status === 'current' && (
-                    <div className={`flex items-center gap-1 mb-2 ${isLeft ? 'justify-end' : 'justify-start'}`}>
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h4 className={`font-bold text-sm ${isCompleted || isCurrent ? colors.text : 'text-teal-500'}`}>
+                      {gateInfo.name}
+                    </h4>
+                    {isCompleted && <CheckIcon className="w-4 h-4 text-emerald-400" />}
+                    {isCurrent && (
                       <motion.span
                         animate={{ opacity: [1, 0.5, 1] }}
                         transition={{ duration: 2, repeat: Infinity }}
-                        className="text-xs px-2 py-0.5 rounded-full bg-teal-500/30 text-teal-300 font-medium"
+                        className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/20 text-white"
                       >
-                        ✨ In Progress
+                        Current
                       </motion.span>
-                    </div>
-                  )}
-
-                  <div className={`text-[10px] font-medium mb-1 ${
-                    milestone.status === 'completed' ? 'text-emerald-500' :
-                    milestone.status === 'current' ? 'text-teal-400' : 'text-teal-600'
-                  }`}>
-                    {milestone.gate}
+                    )}
                   </div>
-
-                  <h4 className={`font-bold text-sm ${
-                    milestone.status === 'completed' ? 'text-emerald-300' :
-                    milestone.status === 'current' ? 'text-white' : 'text-teal-500'
-                  }`}>
-                    {milestone.title}
-                  </h4>
-
-                  <p className={`text-xs mt-1 ${
-                    milestone.status === 'upcoming' ? 'text-teal-600' : 'text-teal-300/80'
-                  }`}>
-                    {milestone.description}
+                  <p className={`text-[11px] mb-2 ${isUpcoming ? 'text-teal-600' : 'text-teal-300/80'}`}>
+                    {gateInfo.description}
                   </p>
 
-                  {/* Achievements */}
-                  {milestone.achievements && milestone.achievements.length > 0 && milestone.status !== 'upcoming' && (
-                    <div className={`mt-2 pt-2 border-t ${isDark ? 'border-slate-700/30' : 'border-teal-700/30'}`}>
-                      <div className={`flex flex-wrap gap-1 ${isLeft ? 'justify-end' : 'justify-start'}`}>
-                        {milestone.achievements.map((achievement, i) => (
-                          <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300">
-                            {achievement}
-                          </span>
-                        ))}
-                      </div>
+                  {/* Deliverables */}
+                  {!isUpcoming && (
+                    <div className="flex flex-wrap gap-1">
+                      {gateInfo.deliverables.map((item, i) => (
+                        <span
+                          key={i}
+                          className={`text-[9px] px-1.5 py-0.5 rounded ${
+                            isCompleted
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-white/10 text-teal-300'
+                          }`}
+                        >
+                          {isCompleted && '✓ '}{item}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {isUpcoming && (
+                    <div className="flex flex-wrap gap-1">
+                      {gateInfo.deliverables.slice(0, 3).map((item, i) => (
+                        <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700/30 text-teal-500">
+                          {item}
+                        </span>
+                      ))}
+                      {gateInfo.deliverables.length > 3 && (
+                        <span className="text-[9px] px-1.5 py-0.5 text-teal-600">
+                          +{gateInfo.deliverables.length - 3} more
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
-              </motion.div>
 
-              {/* Center node */}
-              <div className="relative flex flex-col items-center">
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ delay: delay + 0.1, type: 'spring' }}
-                  className={`w-12 h-12 rounded-full flex items-center justify-center z-10 border-4 ${
-                    milestone.status === 'completed'
-                      ? 'bg-gradient-to-br from-emerald-400 to-emerald-600 border-emerald-300/50 shadow-lg shadow-emerald-500/30'
-                      : milestone.status === 'current'
-                      ? 'bg-gradient-to-br from-teal-400 to-cyan-500 border-teal-300/50 shadow-lg shadow-teal-500/30'
-                      : 'bg-slate-700 border-slate-600'
-                  }`}
-                >
-                  {milestone.status === 'completed' ? (
-                    <CheckIcon className="w-6 h-6 text-white" />
-                  ) : milestone.status === 'current' ? (
-                    <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
-                    >
-                      <SparklesIcon className="w-6 h-6 text-white" />
-                    </motion.div>
-                  ) : (
-                    <FlagIcon className="w-5 h-5 text-teal-500" />
-                  )}
-                </motion.div>
+                {/* Phase indicator */}
+                <div className={`text-[9px] px-2 py-1 rounded-full ${colors.accent}/20 ${colors.text} font-medium shrink-0`}>
+                  {phase.charAt(0).toUpperCase() + phase.slice(1)}
+                </div>
               </div>
-
-              {/* Spacer */}
-              <div className="flex-1 max-w-[280px]" />
             </motion.div>
           );
         })}
-
-        {/* End celebration */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.6 }}
-          className="text-center py-6"
-        >
-          <div className="text-3xl mb-2">🎉</div>
-          <p className="text-sm text-teal-400">Launch awaits at the finish line!</p>
-        </motion.div>
       </div>
+
+      {/* Launch celebration at bottom */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.5 }}
+        className="text-center py-6"
+      >
+        <div className="text-2xl mb-1">🚀</div>
+        <p className="text-xs text-teal-400">Launch awaits!</p>
+      </motion.div>
     </div>
   );
 };
 
 // ============ RIGHT PANEL COMPONENTS ============
 
-// Phase Detail Popup - shows when clicking Plan/Build/Ship buttons
-const PhaseDetailPopup = ({
-  isOpen,
-  onClose,
-  selectedPhase,
-  currentGate,
-  theme,
-  onGateClick
-}: {
-  isOpen: boolean;
-  onClose: () => void;
+// Phase selector - updates the displayed phase in right panel (no popup)
+const PhaseSelector = ({ currentPhase, selectedPhase, onPhaseSelect, theme }: {
+  currentPhase: Phase;
   selectedPhase: Phase;
-  currentGate: number;
-  theme: ThemeMode;
-  onGateClick: (gate: number) => void;
+  onPhaseSelect: (phase: Phase) => void;
+  theme: ThemeMode
 }) => {
-  const isDark = theme === 'dark';
-  const phaseAgents = ALL_AGENTS.filter(a => a.phase === selectedPhase);
-  const phaseGates = GATES_BY_PHASE[selectedPhase];
-  const costs = PHASE_COSTS[selectedPhase];
-
-  const phaseLabels: Record<Phase, string> = {
-    plan: 'Plan Phase',
-    dev: 'Build Phase',
-    ship: 'Ship Phase'
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        onClick={onClose}
-      >
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.9, opacity: 0 }}
-          onClick={(e) => e.stopPropagation()}
-          className={`relative w-full max-w-md rounded-3xl border p-6 ${
-            isDark ? 'bg-slate-900 border-slate-700' : 'bg-teal-900 border-teal-700'
-          }`}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-white">{phaseLabels[selectedPhase]}</h2>
-            <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-700/50">
-              <XMarkIcon className="w-5 h-5 text-teal-400" />
-            </button>
-          </div>
-
-          {/* Team Section */}
-          <div className="mb-5">
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">Team</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {phaseAgents.map((agent) => (
-                <div
-                  key={agent.type}
-                  className={`flex items-center gap-2 p-2 rounded-xl ${
-                    agent.status === 'working' ? 'bg-teal-500/20 border border-teal-500/30' : 'bg-slate-700/30'
-                  }`}
-                >
-                  <span className="text-sm">{agent.icon}</span>
-                  <span className="text-[10px] text-white flex-1 truncate">{agent.name}</span>
-                  {agent.status === 'working' && <BreathingOrb color="bg-teal-400" size="sm" />}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Gates Section */}
-          <div className="mb-5">
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">Gates</h3>
-            <div className="flex gap-2">
-              {phaseGates.map((gateNum) => {
-                const isCompleted = gateNum < currentGate;
-                const isCurrent = gateNum === currentGate;
-                return (
-                  <button
-                    key={gateNum}
-                    onClick={() => isCurrent && onGateClick(gateNum)}
-                    className={`flex-1 py-3 rounded-xl flex items-center justify-center text-sm font-bold transition-all ${
-                      isCompleted ? 'bg-emerald-500 text-white shadow-md' :
-                      isCurrent ? 'bg-amber-500 text-white shadow-md cursor-pointer hover:bg-amber-400' :
-                      'bg-slate-700/40 text-teal-500'
-                    }`}
-                  >
-                    G{gateNum}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Costs Section */}
-          <div>
-            <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">Token Costs</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl p-3 text-center bg-teal-500/10">
-                <div className="text-lg font-bold text-teal-300">{costs.current}</div>
-                <div className="text-[9px] text-teal-500">Current Gate</div>
-              </div>
-              <div className="rounded-xl p-3 text-center bg-emerald-500/10">
-                <div className="text-lg font-bold text-emerald-400">{costs.total}</div>
-                <div className="text-[9px] text-teal-500">Phase Total</div>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
-  );
-};
-
-const PhaseIndicator = ({ currentPhase, onPhaseClick, theme }: { currentPhase: Phase; onPhaseClick: (phase: Phase) => void; theme: ThemeMode }) => {
   const phases: { id: Phase; label: string }[] = [
     { id: 'plan', label: 'Plan' },
     { id: 'dev', label: 'Build' },
@@ -1455,26 +1325,33 @@ const PhaseIndicator = ({ currentPhase, onPhaseClick, theme }: { currentPhase: P
 
   return (
     <Panel theme={theme} className="p-3">
-      <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 px-1 text-teal-400">Current Phase</h3>
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 px-1 text-teal-400">Phase</h3>
       <div className="flex gap-1.5">
         {phases.map((p) => (
           <button
             key={p.id}
-            onClick={() => onPhaseClick(p.id)}
-            className={`flex-1 text-center py-2.5 px-2 rounded-xl transition-all cursor-pointer ${
-              currentPhase === p.id ? 'bg-teal-500 shadow-md hover:bg-teal-400' : 'bg-slate-700/30 hover:bg-slate-700/50'
+            onClick={() => onPhaseSelect(p.id)}
+            className={`flex-1 text-center py-2 px-2 rounded-xl transition-all cursor-pointer ${
+              selectedPhase === p.id
+                ? 'bg-teal-500 shadow-md'
+                : currentPhase === p.id
+                  ? 'bg-teal-500/30 ring-1 ring-teal-500/50'
+                  : 'bg-slate-700/30 hover:bg-slate-700/50'
             }`}
           >
-            <div className={`text-xs font-medium ${currentPhase === p.id ? 'text-white' : 'text-teal-400'}`}>{p.label}</div>
+            <div className={`text-xs font-medium ${selectedPhase === p.id ? 'text-white' : 'text-teal-400'}`}>{p.label}</div>
           </button>
         ))}
       </div>
-      <p className="text-[9px] text-teal-500 mt-2 text-center">Click phase for details</p>
+      {selectedPhase !== currentPhase && (
+        <p className="text-[9px] text-teal-500 mt-2 text-center">Viewing {selectedPhase} phase</p>
+      )}
     </Panel>
   );
 };
 
-const ActiveAgentsPanel = ({ phase, theme: _theme }: { phase: Phase; theme: ThemeMode }) => {
+// Team panel - no icons, just names with status indicator
+const TeamPanel = ({ phase, theme: _theme }: { phase: Phase; theme: ThemeMode }) => {
   const phaseAgents = ALL_AGENTS.filter(a => a.phase === phase);
   const activeCount = phaseAgents.filter(a => a.status === 'working').length;
 
@@ -1482,16 +1359,22 @@ const ActiveAgentsPanel = ({ phase, theme: _theme }: { phase: Phase; theme: Them
     <div className="px-3 py-2">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-teal-400">
-          Your Team
+          Team
         </h3>
         <span className="text-[9px] bg-teal-500 text-white px-2 py-0.5 rounded-full">{activeCount} active</span>
       </div>
       <div className="space-y-1">
-        {phaseAgents.filter(a => a.status === 'working').map((agent) => (
-          <div key={agent.type} className="flex items-center gap-2 p-1.5 rounded-lg bg-teal-500/10">
-            <span className="text-sm">{agent.icon}</span>
-            <span className="text-[10px] text-white flex-1 truncate">{agent.name}</span>
-            <BreathingOrb color="bg-teal-400" size="sm" />
+        {phaseAgents.map((agent) => (
+          <div
+            key={agent.type}
+            className={`flex items-center gap-2 p-1.5 rounded-lg ${
+              agent.status === 'working' ? 'bg-teal-500/20' : 'bg-slate-700/20'
+            }`}
+          >
+            <span className={`text-[10px] flex-1 ${agent.status === 'working' ? 'text-white' : 'text-teal-400'}`}>
+              {agent.name}
+            </span>
+            {agent.status === 'working' && <BreathingOrb color="bg-teal-400" size="sm" />}
           </div>
         ))}
       </div>
@@ -1499,58 +1382,81 @@ const ActiveAgentsPanel = ({ phase, theme: _theme }: { phase: Phase; theme: Them
   );
 };
 
-const GateProgressPanel = ({ currentGate, currentPhase, theme, onGateClick }: { currentGate: number; currentPhase: Phase; theme: ThemeMode; onGateClick: (gate: number) => void }) => {
-  const phaseGates = GATES_BY_PHASE[currentPhase];
+// Gates panel - vertical layout with gate name on right
+const GatesPanel = ({ currentGate, selectedPhase, theme, onGateClick }: {
+  currentGate: number;
+  selectedPhase: Phase;
+  theme: ThemeMode;
+  onGateClick: (gate: number) => void
+}) => {
+  const phaseGates = GATES_BY_PHASE[selectedPhase];
+  const isDark = theme === 'dark';
 
   return (
     <div className="px-3 py-2">
       <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">
-        Gate Progress
+        Gates
       </h3>
-      <div className="flex gap-1.5">
+      <div className="space-y-1.5">
         {phaseGates.map((gateNum) => {
           const isCompleted = gateNum < currentGate;
           const isCurrent = gateNum === currentGate;
+          const gateInfo = GATE_INFO[gateNum];
           return (
             <button
               key={gateNum}
               onClick={() => isCurrent && onGateClick(gateNum)}
-              className={`flex-1 aspect-square rounded-xl flex items-center justify-center text-xs font-bold transition-all ${
-                isCompleted ? 'bg-emerald-500 text-white shadow-md' :
-                isCurrent ? 'bg-amber-500 text-white shadow-md ring-2 ring-amber-400/30 cursor-pointer hover:bg-amber-400' :
-                'bg-slate-700/40 text-teal-500'
+              className={`w-full flex items-center gap-2 p-2 rounded-xl transition-all ${
+                isCompleted
+                  ? 'bg-emerald-500/20 border border-emerald-500/30'
+                  : isCurrent
+                    ? `${isDark ? 'bg-amber-500/20' : 'bg-amber-500/30'} border border-amber-500/50 cursor-pointer hover:bg-amber-500/30`
+                    : 'bg-slate-700/20 border border-transparent'
               }`}
             >
-              G{gateNum}
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
+                isCompleted ? 'bg-emerald-500 text-white' :
+                isCurrent ? 'bg-amber-500 text-white' :
+                'bg-slate-700/50 text-teal-500'
+              }`}>
+                G{gateNum}
+              </div>
+              <div className="flex-1 text-left">
+                <div className={`text-[10px] font-medium ${
+                  isCompleted ? 'text-emerald-400' : isCurrent ? 'text-amber-300' : 'text-teal-500'
+                }`}>
+                  {gateInfo.name}
+                </div>
+              </div>
+              {isCompleted && <CheckIcon className="w-4 h-4 text-emerald-400" />}
+              {isCurrent && <span className="text-[8px] text-amber-400">Review</span>}
             </button>
           );
         })}
       </div>
-      {phaseGates.includes(currentGate) && (
-        <p className="text-[9px] text-amber-400 mt-2 text-center">
-          Click G{currentGate} to review
-        </p>
-      )}
     </div>
   );
 };
 
-const CostMetrics = ({ phase, theme: _theme }: { phase: Phase; theme: ThemeMode }) => {
-  const costs = PHASE_COSTS[phase];
+// Costs panel - vertical layout with gate, phase, and total
+const CostsPanel = ({ selectedPhase, theme: _theme }: { selectedPhase: Phase; theme: ThemeMode }) => {
   return (
     <div className="px-3 py-2">
-      <div className="flex items-center gap-1.5 mb-2">
-        <BanknotesIcon className="w-3 h-3 text-emerald-400" />
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-teal-400">Token Costs</h3>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-xl p-2 text-center bg-teal-500/10">
-          <div className="text-lg font-bold text-teal-300">{costs.current}</div>
-          <div className="text-[9px] text-teal-500">This Gate</div>
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider mb-2 text-teal-400">
+        Token Costs
+      </h3>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between p-2 rounded-xl bg-teal-500/10">
+          <span className="text-[10px] text-teal-400">Current Gate</span>
+          <span className="text-sm font-bold text-teal-300">{COST_DATA.gate}</span>
         </div>
-        <div className="rounded-xl p-2 text-center bg-emerald-500/10">
-          <div className="text-lg font-bold text-emerald-400">{costs.total}</div>
-          <div className="text-[9px] text-teal-500">Phase Total</div>
+        <div className="flex items-center justify-between p-2 rounded-xl bg-teal-500/10">
+          <span className="text-[10px] text-teal-400">{selectedPhase.charAt(0).toUpperCase() + selectedPhase.slice(1)} Phase</span>
+          <span className="text-sm font-bold text-teal-300">{COST_DATA[selectedPhase]}</span>
+        </div>
+        <div className="flex items-center justify-between p-2 rounded-xl bg-emerald-500/10">
+          <span className="text-[10px] text-emerald-400">Project Total</span>
+          <span className="text-sm font-bold text-emerald-400">{COST_DATA.total}</span>
         </div>
       </div>
     </div>
@@ -1610,7 +1516,6 @@ export default function UnifiedDashboard() {
   const [showGitHub, setShowGitHub] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showGateApproval, setShowGateApproval] = useState(false);
-  const [showPhaseDetail, setShowPhaseDetail] = useState(false);
   const [selectedPhase, setSelectedPhase] = useState<Phase>('plan');
   const [currentProjectName, setCurrentProjectName] = useState('E-Commerce Platform');
   const currentGate = 3;
@@ -1664,17 +1569,6 @@ export default function UnifiedDashboard() {
         onDeny={handleGateDeny}
         gateData={mockGateApproval}
         theme={theme}
-      />
-      <PhaseDetailPopup
-        isOpen={showPhaseDetail}
-        onClose={() => setShowPhaseDetail(false)}
-        selectedPhase={selectedPhase}
-        currentGate={currentGate}
-        theme={theme}
-        onGateClick={() => {
-          setShowPhaseDetail(false);
-          setShowGateApproval(true);
-        }}
       />
 
       {/* Header */}
@@ -1764,25 +1658,23 @@ export default function UnifiedDashboard() {
 
           {/* Right Panel */}
           <div className={`w-[260px] min-w-[220px] p-3 flex flex-col gap-3 ${isDark ? 'bg-slate-900/30' : 'bg-teal-900/30'}`}>
-            <PhaseIndicator
+            <PhaseSelector
               currentPhase={currentPhase}
-              onPhaseClick={(phase) => {
-                setSelectedPhase(phase);
-                setShowPhaseDetail(true);
-              }}
+              selectedPhase={selectedPhase}
+              onPhaseSelect={setSelectedPhase}
               theme={theme}
             />
             <Panel theme={theme} className="flex-1 overflow-auto">
-              <ActiveAgentsPanel phase={currentPhase} theme={theme} />
+              <TeamPanel phase={selectedPhase} theme={theme} />
               <div className={`border-t mx-3 ${isDark ? 'border-slate-700/30' : 'border-teal-700/30'}`} />
-              <GateProgressPanel
+              <GatesPanel
                 currentGate={currentGate}
-                currentPhase={currentPhase}
+                selectedPhase={selectedPhase}
                 theme={theme}
                 onGateClick={() => setShowGateApproval(true)}
               />
               <div className={`border-t mx-3 ${isDark ? 'border-slate-700/30' : 'border-teal-700/30'}`} />
-              <CostMetrics phase={currentPhase} theme={theme} />
+              <CostsPanel selectedPhase={selectedPhase} theme={theme} />
             </Panel>
           </div>
         </div>

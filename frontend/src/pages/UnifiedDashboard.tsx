@@ -6,14 +6,12 @@ import {
   ComputerDesktopIcon,
   PaperAirplaneIcon,
   StopIcon,
-  SparklesIcon,
   CpuChipIcon,
   FolderIcon,
   FolderOpenIcon,
   DocumentIcon,
   ChevronRightIcon,
   ChevronDownIcon,
-  FlagIcon,
   CheckIcon,
   XMarkIcon,
   SunIcon,
@@ -22,7 +20,7 @@ import {
   ArrowsPointingInIcon,
 } from '@heroicons/react/24/outline';
 import { projectsApi } from '../api/projects';
-import FuzzyLlamaLogoSvg from '../assets/fuzzy-llama-logo.svg';
+import FuzzyLlamaLogoSvg from '../assets/Llamalogo.png';
 
 // Types
 interface ChatMessage {
@@ -1697,7 +1695,7 @@ const MomentumWidget = ({ theme }: { theme: ThemeMode }) => {
   const isDark = theme === 'dark';
 
   // Simulated momentum data
-  const [momentum, setMomentum] = useState({
+  const [momentum] = useState({
     velocity: 12, // tasks per hour
     streak: 5,    // consecutive gates without rejection
     todayTasks: 8,
@@ -2035,7 +2033,8 @@ export default function UnifiedDashboard() {
   const currentPhase = getPhase(currentGate);
   const isDark = theme === 'dark';
 
-  const { data: projects } = useQuery({
+  // Prefetch projects for future use
+  useQuery({
     queryKey: ['projects'],
     queryFn: () => projectsApi.list(),
   });

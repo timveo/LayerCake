@@ -36,7 +36,7 @@ export function useWebSocket(projectId?: string, events?: WebSocketEvents) {
     if (!authStorage) return null;
 
     try {
-      const parsed = JSON.parse(authStorage);
+      JSON.parse(authStorage); // Validate JSON
       // The token is stored in the state.user object after login
       // We need to get it from the API client's stored token
       const apiToken = localStorage.getItem('accessToken');

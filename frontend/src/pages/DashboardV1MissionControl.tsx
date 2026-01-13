@@ -251,17 +251,22 @@ export default function DashboardV1MissionControl() {
 
   const { data: projects } = useQuery({
     queryKey: ['projects'],
-    queryFn: () => projectsApi.getProjects()
+    queryFn: () => projectsApi.list()
   });
 
+  // Get first project ID for stats queries
+  const projectId = projects?.[0]?.id;
+
   const { data: taskStats } = useQuery({
-    queryKey: ['taskStats'],
-    queryFn: () => tasksApi.getTaskStats()
+    queryKey: ['taskStats', projectId],
+    queryFn: () => tasksApi.getStats(projectId!),
+    enabled: !!projectId
   });
 
   const { data: gateStats } = useQuery({
-    queryKey: ['gateStats'],
-    queryFn: () => gatesApi.getGateStats()
+    queryKey: ['gateStats', projectId],
+    queryFn: () => gatesApi.getStats(projectId!),
+    enabled: !!projectId
   });
 
   // Mock data for demonstration - would come from real API

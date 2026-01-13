@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import toast, { Toaster, Toast } from 'react-hot-toast';
+import toast, { Toaster, type Toast } from 'react-hot-toast';
 
 export type NotificationType = 'success' | 'error' | 'info' | 'warning';
 

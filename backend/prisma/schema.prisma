@@ -23,6 +23,10 @@ model User {
   avatarUrl     String?
   emailVerified Boolean  @default(false)
 
+  // Password reset
+  resetToken       String?
+  resetTokenExpiry DateTime?
+
   // OAuth
   githubId      String?  @unique
   googleId      String?  @unique

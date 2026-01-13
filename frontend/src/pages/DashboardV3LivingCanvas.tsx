@@ -2,10 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion';
 import {
   CubeTransparentIcon,
-  CircleStackIcon,
-  CloudIcon,
   CodeBracketIcon,
-  CpuChipIcon,
   ShieldCheckIcon,
   EyeIcon,
   ArrowTrendingUpIcon,
@@ -350,17 +347,22 @@ export default function DashboardV3LivingCanvas() {
 
   const { data: projects } = useQuery({
     queryKey: ['projects'],
-    queryFn: () => projectsApi.getProjects()
+    queryFn: () => projectsApi.list()
   });
 
+  // Get first project ID for stats queries
+  const projectId = projects?.[0]?.id;
+
   const { data: taskStats } = useQuery({
-    queryKey: ['taskStats'],
-    queryFn: () => tasksApi.getTaskStats()
+    queryKey: ['taskStats', projectId],
+    queryFn: () => tasksApi.getStats(projectId!),
+    enabled: !!projectId
   });
 
   const { data: gateStats } = useQuery({
-    queryKey: ['gateStats'],
-    queryFn: () => gatesApi.getGateStats()
+    queryKey: ['gateStats', projectId],
+    queryFn: () => gatesApi.getStats(projectId!),
+    enabled: !!projectId
   });
 
   // Organic nodes representing project components

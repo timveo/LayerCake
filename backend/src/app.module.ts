@@ -32,8 +32,8 @@ import { GitHubModule } from './integrations/github/github.module';
 import { RailwayModule } from './integrations/railway/railway.module';
 import { StateSyncModule } from './state-sync/state-sync.module';
 import { EventsModule } from './events/events.module';
-import { EmbeddingsModule } from './embeddings/embeddings.module';
-import { QueueModule } from './queue/queue.module';
+// import { EmbeddingsModule } from './embeddings/embeddings.module'; // Disabled - needs pgvector
+// import { QueueModule } from './queue/queue.module'; // Disabled - requires Redis
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { ObservabilityModule } from './observability/observability.module';
 import { StorageModule } from './storage/storage.module';
@@ -88,8 +88,8 @@ import { envValidationSchema } from './config/env.validation';
     RailwayModule,
     StateSyncModule,
     EventsModule,
-    // EmbeddingsModule, // Temporarily disabled - needs pgvector extension
-    QueueModule,
+    // EmbeddingsModule, // Disabled - needs pgvector extension
+    // QueueModule, // Disabled - requires Redis
   ],
   controllers: [AppController],
   providers: [

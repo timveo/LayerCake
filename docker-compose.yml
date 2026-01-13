@@ -1,187 +1,35 @@
-version: '3.8'
+# Simplified LayerCake Development Setup
+# Requires: Local PostgreSQL running on localhost:5432
 
 services:
-  # Nginx Reverse Proxy
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./frontend/dist:/usr/share/nginx/html:ro
-    depends_on:
-      - backend
-      - websocket
-    restart: unless-stopped
-    networks:
-      - layercake-network
-
-  # Backend API
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    env_file:
-      - .env
-    environment:
-      - NODE_ENV=${NODE_ENV:-development}
-      - PORT=${PORT:-3000}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - layercake-network
-
-  # WebSocket Server
-  websocket:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    command: npm run start:websocket
-    env_file:
-      - .env
-    environment:
-      - NODE_ENV=${NODE_ENV:-development}
-      - WS_PORT=${WS_PORT:-3001}
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - layercake-network
-
   # Frontend (React + Vite)
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    env_file:
-      - ./frontend/.env
+    ports:
+      - "3000:80"
     depends_on:
       - backend
     restart: unless-stopped
-    networks:
-      - layercake-network
 
-  # Worker Service (Agent Job Processor)
-  worker:
+  # Backend API (NestJS)
+  backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile.worker
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3000"
     env_file:
       - .env
     environment:
-      - NODE_ENV=${NODE_ENV:-development}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      replicas: 2  # Scale workers for parallel agent execution
-    networks:
-      - layercake-network
-
-  # PostgreSQL Database with pgvector
-  postgres:
-    image: pgvector/pgvector:pg16
-    environment:
-      - POSTGRES_DB=${POSTGRES_DB:-layercake}
-      - POSTGRES_USER=${POSTGRES_USER:-layercake}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://layercake:layercake@host.docker.internal:5432/layercake
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-layercake}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - layercake-network
-
-  # Redis
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - layercake-network
-
-  # Prometheus for metrics
-  prometheus:
-    image: prom/prometheus:latest
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
-    volumes:
-      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
-    restart: unless-stopped
-    networks:
-      - layercake-network
-
-  # Grafana for dashboards
-  grafana:
-    image: grafana/grafana:latest
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/layercake-overview.json
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./backend/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./docker/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
-    ports:
-      - "3002:3000"  # Changed from 3001 to avoid conflict with websocket
-    depends_on:
-      - prometheus
-    restart: unless-stopped
-    networks:
-      - layercake-network
-
-  # Tempo for distributed tracing
-  tempo:
-    image: grafana/tempo:latest
-    command: ["-config.file=/etc/tempo.yml"]
-    volumes:
-      - ./docker/tempo/tempo.yml:/etc/tempo.yml:ro
-      - tempo_data:/var/tempo
-    ports:
-      - "4318:4318"  # OTLP HTTP
-      - "3200:3200"  # Tempo API
-    restart: unless-stopped
-    networks:
-      - layercake-network
-
-volumes:
-  postgres_data:
-  redis_data:
-  prometheus_data:
-  grafana_data:
-  tempo_data:
-
-networks:
-  layercake-network:
-    driver: bridge
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

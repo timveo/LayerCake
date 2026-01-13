@@ -171,7 +171,7 @@ export const GitHubExportModal: React.FC<GitHubExportModalProps> = ({
               <Button
                 onClick={handleExport}
                 disabled={!repoName.trim() || isExporting}
-                loading={isExporting}
+                isLoading={isExporting}
                 className="flex-1"
               >
                 <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24">

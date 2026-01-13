@@ -81,7 +81,7 @@ export const GitHubConnect: React.FC<GitHubConnectProps> = ({
               </p>
               <Button
                 onClick={handleConnect}
-                loading={isLoading}
+                isLoading={isLoading}
                 disabled={isLoading}
                 size="sm"
               >

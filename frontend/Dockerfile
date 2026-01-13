@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (legacy-peer-deps for React 19 compatibility)
+RUN npm ci --legacy-peer-deps
 
 # Copy source code
 COPY . .
@@ -21,7 +21,8 @@ FROM nginx:alpine
 # Copy built app from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy nginx configuration (handled by docker/nginx/nginx.conf in parent)
+# Copy nginx configuration for SPA routing
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Expose port 80
 EXPOSE 80

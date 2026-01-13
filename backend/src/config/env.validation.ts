@@ -8,8 +8,8 @@ export const envValidationSchema = Joi.object({
   // Database
   DATABASE_URL: Joi.string().required(),
 
-  // Redis
-  REDIS_HOST: Joi.string().required(),
+  // Redis (optional - only needed if using QueueModule)
+  REDIS_HOST: Joi.string().optional().default('localhost'),
   REDIS_PORT: Joi.number().default(6379),
   REDIS_PASSWORD: Joi.string().optional().allow(''),
 
@@ -36,9 +36,9 @@ export const envValidationSchema = Joi.object({
   S3_BUCKET: Joi.string().optional().allow(''),
   S3_REGION: Joi.string().default('auto'),
 
-  // AI Providers
-  OPENAI_API_KEY: Joi.string().required(),
-  ANTHROPIC_API_KEY: Joi.string().required(),
+  // AI Providers (optional for basic app functionality)
+  OPENAI_API_KEY: Joi.string().optional().allow(''),
+  ANTHROPIC_API_KEY: Joi.string().optional().allow(''),
 
   // GitHub
   GITHUB_CLIENT_ID: Joi.string().optional().allow(''),

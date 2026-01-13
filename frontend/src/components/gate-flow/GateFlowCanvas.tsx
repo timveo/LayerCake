@@ -1,7 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
 import ReactFlow, {
-  Node,
-  Edge,
   Background,
   Controls,
   MiniMap,
@@ -9,8 +7,10 @@ import ReactFlow, {
   useEdgesState,
   MarkerType,
 } from 'reactflow';
+import type { Node, Edge } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { GateNode, GateNodeData, GateStatus } from './GateNode';
+import { GateNode } from './GateNode';
+import type { GateNodeData, GateStatus } from './GateNode';
 
 export interface Gate {
   gateType: string;

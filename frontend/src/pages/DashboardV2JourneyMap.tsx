@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   MapIcon,
   FlagIcon,
@@ -277,12 +277,16 @@ const BuilderQuote = () => {
 export default function DashboardV2JourneyMap() {
   const { data: projects } = useQuery({
     queryKey: ['projects'],
-    queryFn: () => projectsApi.getProjects()
+    queryFn: () => projectsApi.list()
   });
 
+  // Get first project ID for stats queries
+  const projectId = projects?.[0]?.id;
+
   const { data: taskStats } = useQuery({
-    queryKey: ['taskStats'],
-    queryFn: () => tasksApi.getTaskStats()
+    queryKey: ['taskStats', projectId],
+    queryFn: () => tasksApi.getStats(projectId!),
+    enabled: !!projectId
   });
 
   const milestones: JourneyMilestone[] = [

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '../ui/Button';
-import { ProofArtifact, ProofArtifactViewer } from '../artifacts/ProofArtifactViewer';
+import { ProofArtifactViewer } from '../artifacts/ProofArtifactViewer';
+import type { ProofArtifact } from '../artifacts/ProofArtifactViewer';
 
 export interface GateApprovalData {
   gateType: string;
@@ -203,7 +204,7 @@ export const GateApprovalInterface: React.FC<GateApprovalInterfaceProps> = ({
         <Button
           onClick={handleApprove}
           disabled={!allRequiredChecked || isApproving || isRejecting}
-          loading={isApproving}
+          isLoading={isApproving}
         >
           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -241,7 +242,7 @@ export const GateApprovalInterface: React.FC<GateApprovalInterfaceProps> = ({
               <Button
                 onClick={handleReject}
                 disabled={!rejectionReason.trim() || isRejecting}
-                loading={isRejecting}
+                isLoading={isRejecting}
               >
                 {isRejecting ? 'Rejecting...' : 'Reject Gate'}
               </Button>

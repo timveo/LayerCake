@@ -22,6 +22,7 @@ import {
 import { useThemeStore } from '../stores/theme';
 import { useAuthStore } from '../stores/auth';
 import FuzzyLlamaLogo from '../assets/Llamalogo.png';
+import FuzzyLlamaLogoTransparent from '../assets/Llamalogo-transparent.png';
 
 const HomePage = () => {
   const navigate = useNavigate();
@@ -170,7 +171,16 @@ const HomePage = () => {
         {/* Content */}
         <div className="relative z-10 h-full flex flex-col px-8">
           {/* Spacer for heading positioning */}
-          <div className="flex-1 flex items-end justify-center pb-4">
+          <div className="flex-1 flex flex-col items-center justify-end pb-4">
+            {/* Large White Llama */}
+            <motion.img
+              src={FuzzyLlamaLogoTransparent}
+              alt="Fuzzy Llama"
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ type: 'spring', delay: 0.05 }}
+              className="w-48 h-48 mb-4"
+            />
             {/* Main Heading */}
             <motion.h1
               initial={{ opacity: 0, y: -20 }}

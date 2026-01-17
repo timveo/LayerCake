@@ -15,6 +15,20 @@ export const SplashPage = ({ onGetStarted }: SplashPageProps) => {
         animate={{ opacity: 1, y: 0 }}
         className="max-w-4xl w-full text-center"
       >
+        {/* Large White Llama */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: 'spring', delay: 0.1 }}
+          className="mb-8"
+        >
+          <img
+            src={FuzzyLlamaLogoSvg}
+            alt="Fuzzy Llama"
+            className="w-48 h-48 mx-auto brightness-0 invert"
+          />
+        </motion.div>
+
         {/* Logo */}
         <motion.div
           initial={{ scale: 0 }}

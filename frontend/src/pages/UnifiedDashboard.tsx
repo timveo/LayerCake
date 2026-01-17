@@ -21,6 +21,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { projectsApi } from '../api/projects';
 import FuzzyLlamaLogoSvg from '../assets/Llamalogo.png';
+import FuzzyLlamaLogoTransparent from '../assets/Llamalogo-transparent.png';
 
 // Types
 interface ChatMessage {
@@ -557,6 +558,20 @@ const SplashPage = ({ onGetStarted }: { onGetStarted: () => void }) => {
         animate={{ opacity: 1, y: 0 }}
         className="max-w-4xl w-full text-center"
       >
+        {/* Large White Llama */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: 'spring', delay: 0.1 }}
+          className="mb-8"
+        >
+          <img
+            src={FuzzyLlamaLogoTransparent}
+            alt="Fuzzy Llama"
+            className="w-64 h-64 mx-auto"
+          />
+        </motion.div>
+
         {/* Logo */}
         <motion.div
           initial={{ scale: 0 }}

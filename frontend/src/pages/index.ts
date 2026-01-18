@@ -1,10 +1,4 @@
 export { Login } from './Login';
 export { Register } from './Register';
-export { Dashboard } from './Dashboard';
-export { CreateProject } from './CreateProject';
-export { ProjectDetail } from './ProjectDetail';
-export { Tasks } from './Tasks';
-export { Gates } from './Gates';
-export { AgentExecution } from './AgentExecution';
-export { Settings } from './Settings';
-export { DocumentViewer } from './DocumentViewer';
+export { default as HomePage } from './HomePage';
+export { default as UnifiedDashboard } from './UnifiedDashboard';

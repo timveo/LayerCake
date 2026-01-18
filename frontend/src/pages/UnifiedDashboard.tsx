@@ -14,14 +14,15 @@ import {
   ChevronDownIcon,
   CheckIcon,
   XMarkIcon,
-  SunIcon,
-  MoonIcon,
   ArrowsPointingOutIcon,
   ArrowsPointingInIcon,
 } from '@heroicons/react/24/outline';
 import { projectsApi } from '../api/projects';
+import { useThemeStore } from '../stores/theme';
+import { useAuthStore } from '../stores/auth';
 import FuzzyLlamaLogoSvg from '../assets/Llamalogo.png';
 import FuzzyLlamaLogoTransparent from '../assets/Llamalogo-transparent.png';
+import { SettingsModal } from '../components/SettingsModal';
 
 // Types
 interface ChatMessage {
@@ -357,7 +358,7 @@ const Panel = ({ children, className = '', theme }: { children: React.ReactNode;
     <div className={`backdrop-blur-sm rounded-2xl border ${
       isDark
         ? 'bg-slate-800/60 border-slate-700/50'
-        : 'bg-teal-500/50 border-teal-600/40'
+        : 'bg-white border-slate-200 shadow-sm'
     } ${className}`}>
       {children}
     </div>
@@ -711,79 +712,6 @@ const GitHubPopup = ({ isOpen, onClose, theme }: { isOpen: boolean; onClose: () 
   );
 };
 
-// ============ SETTINGS POPUP ============
-
-const SettingsPopup = ({ isOpen, onClose, theme, onToggleTheme }: {
-  isOpen: boolean;
-  onClose: () => void;
-  theme: ThemeMode;
-  onToggleTheme: () => void;
-}) => {
-  if (!isOpen) return null;
-  const isDark = theme === 'dark';
-
-  return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/50 z-50 flex items-start justify-end p-4 pt-16"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ opacity: 0, y: -10, scale: 0.95 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -10, scale: 0.95 }}
-          onClick={(e) => e.stopPropagation()}
-          className={`rounded-2xl shadow-xl border w-64 overflow-hidden ${
-            isDark ? 'bg-slate-800 border-slate-700' : 'bg-teal-900 border-teal-700'
-          }`}
-        >
-          <div className={`p-4 border-b flex items-center justify-between ${isDark ? 'border-slate-700' : 'border-teal-700'}`}>
-            <span className="font-semibold text-white">Settings</span>
-            <button onClick={onClose} className="text-slate-400 hover:text-white">
-              <XMarkIcon className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="p-2">
-            <button
-              onClick={onToggleTheme}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors ${
-                isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-800'
-              }`}
-            >
-              {isDark ? (
-                <SunIcon className="w-5 h-5 text-amber-400" />
-              ) : (
-                <MoonIcon className="w-5 h-5 text-teal-300" />
-              )}
-              <span className="text-sm text-white">
-                {isDark ? 'Light Mode' : 'Dark Mode'}
-              </span>
-            </button>
-            <button className={`w-full flex flex-col p-3 rounded-xl transition-colors text-left ${
-              isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-800'
-            }`}>
-              <span className="text-sm text-white">Profile</span>
-            </button>
-            <button className={`w-full flex flex-col p-3 rounded-xl transition-colors text-left ${
-              isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-800'
-            }`}>
-              <span className="text-sm text-white">Preferences</span>
-            </button>
-            <div className={`border-t my-2 ${isDark ? 'border-slate-700' : 'border-teal-700'}`} />
-            <button className={`w-full flex flex-col p-3 rounded-xl transition-colors text-left ${
-              isDark ? 'hover:bg-red-500/20' : 'hover:bg-red-500/20'
-            }`}>
-              <span className="text-sm text-red-400">Sign Out</span>
-            </button>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
-  );
-};
 
 // ============ LEFT PANEL COMPONENTS ============
 
@@ -1511,34 +1439,34 @@ const useAnimatedCounter = (target: number, duration: number = 1000) => {
 };
 
 // ============ 1. TEAM WIDGET - Animated agent status ============
-const TeamWidget = ({ phase, theme }: { phase: Phase; theme: ThemeMode }) => {
+const TeamWidget = ({ phase, theme, expanded }: { phase: Phase; theme: ThemeMode; expanded?: boolean }) => {
   const phaseAgents = ALL_AGENTS.filter(a => a.phase === phase);
   const activeAgents = phaseAgents.filter(a => a.status === 'working');
   const isDark = theme === 'dark';
 
   return (
-    <Panel theme={theme} className="p-1.5">
-      <div className="flex items-center justify-between mb-1">
-        <h3 className={`text-[8px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-700'}`}>Team</h3>
-        <span className={`text-[8px] font-bold ${isDark ? 'text-teal-300' : 'text-teal-600'}`}>{activeAgents.length}/{phaseAgents.length}</span>
+    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <h3 className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Team</h3>
+        <span className={`text-[9px] font-bold ${isDark ? 'text-teal-300' : 'text-teal-600'}`}>{activeAgents.length}/{phaseAgents.length}</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-0.5">
+      <div className="grid grid-cols-2 gap-1">
         {phaseAgents.map((agent) => (
           <div
             key={agent.type}
-            className={`relative flex items-center gap-1 p-0.5 rounded transition-all ${
+            className={`relative flex items-center gap-1.5 p-1 rounded transition-all ${
               agent.status === 'working'
-                ? isDark ? 'bg-gradient-to-r from-teal-500/30 to-transparent' : 'bg-gradient-to-r from-teal-300/50 to-transparent'
-                : isDark ? 'bg-slate-700/20' : 'bg-white/60'
+                ? isDark ? 'bg-gradient-to-r from-teal-500/30 to-transparent' : 'bg-gradient-to-r from-teal-100 to-transparent'
+                : isDark ? 'bg-slate-700/20' : 'bg-slate-100'
             }`}
           >
-            <span className="text-[9px]">{agent.icon}</span>
-            <span className={`text-[7px] truncate flex-1 ${agent.status === 'working' ? isDark ? 'text-white font-medium' : 'text-teal-800 font-medium' : isDark ? 'text-teal-400' : 'text-teal-700'}`}>
+            <span className="text-sm">{agent.icon}</span>
+            <span className={`text-[8px] truncate flex-1 ${agent.status === 'working' ? isDark ? 'text-white font-medium' : 'text-teal-700 font-medium' : isDark ? 'text-teal-400' : 'text-slate-600'}`}>
               {agent.name}
             </span>
             {agent.status === 'working' && (
-              <motion.div className="w-1 h-1 rounded-full bg-emerald-500" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+              <motion.div className="w-1.5 h-1.5 rounded-full bg-emerald-500" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1, repeat: Infinity }} />
             )}
           </div>
         ))}
@@ -1548,11 +1476,12 @@ const TeamWidget = ({ phase, theme }: { phase: Phase; theme: ThemeMode }) => {
 };
 
 // ============ 2. GATE PROGRESS RING - Circular progress ============
-const GateProgressRing = ({ currentGate, selectedPhase, theme, onGateClick }: {
+const GateProgressRing = ({ currentGate, selectedPhase, theme, onGateClick, expanded }: {
   currentGate: number;
   selectedPhase: Phase;
   theme: ThemeMode;
   onGateClick: (gate: number) => void;
+  expanded?: boolean;
 }) => {
   const isDark = theme === 'dark';
   const totalGates = 10;
@@ -1572,16 +1501,16 @@ const GateProgressRing = ({ currentGate, selectedPhase, theme, onGateClick }: {
   };
 
   return (
-    <Panel theme={theme} className="p-1.5">
-      <div className="flex items-center gap-2">
-        {/* Circular Progress - smaller */}
-        <div className="relative w-12 h-12 flex-shrink-0">
-          <svg className="w-12 h-12 transform -rotate-90">
-            <circle cx="24" cy="24" r="20" stroke={isDark ? '#334155' : '#99f6e4'} strokeWidth="3" fill="none" />
+    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
+      <div className="flex items-center gap-3 h-full">
+        {/* Circular Progress */}
+        <div className="relative w-16 h-16 flex-shrink-0">
+          <svg className="w-16 h-16 transform -rotate-90">
+            <circle cx="32" cy="32" r="26" stroke={isDark ? '#334155' : '#e2e8f0'} strokeWidth="4" fill="none" />
             <motion.circle
-              cx="24" cy="24" r="20"
+              cx="32" cy="32" r="26"
               stroke="url(#progressGradient)"
-              strokeWidth="3"
+              strokeWidth="4"
               fill="none"
               strokeLinecap="round"
               strokeDasharray={circumference}
@@ -1591,31 +1520,31 @@ const GateProgressRing = ({ currentGate, selectedPhase, theme, onGateClick }: {
             />
             <defs>
               <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor={isDark ? '#8b5cf6' : '#0d9488'} />
+                <stop offset="0%" stopColor={isDark ? '#8b5cf6' : '#14b8a6'} />
                 <stop offset="50%" stopColor="#06b6d4" />
                 <stop offset="100%" stopColor="#10b981" />
               </linearGradient>
             </defs>
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className={`text-xs font-bold ${isDark ? 'text-white' : 'text-teal-700'}`}>{Math.round(progress)}%</span>
+            <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-700'}`}>{Math.round(progress)}%</span>
           </div>
         </div>
 
-        {/* Gate Info - compact */}
+        {/* Gate Info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1 mb-0.5">
+          <div className="flex items-center gap-1.5 mb-1">
             <div
-              className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold text-white flex-shrink-0"
+              className="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
               style={{ backgroundColor: phaseColors[selectedPhase] }}
             >
               G{currentGate}
             </div>
-            <p className={`text-[8px] font-semibold truncate ${isDark ? 'text-white' : 'text-teal-800'}`}>{GATE_INFO[currentGate]?.name}</p>
+            <p className={`text-[9px] font-semibold truncate ${isDark ? 'text-white' : 'text-slate-700'}`}>{GATE_INFO[currentGate]?.name}</p>
           </div>
-          <div className="flex items-center gap-1 mb-0.5">
-            <span className={`text-[7px] capitalize ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>{selectedPhase}</span>
-            <div className={`flex-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/50' : 'bg-teal-100'}`}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <span className={`text-[8px] capitalize ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>{selectedPhase}</span>
+            <div className={`flex-1 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/50' : 'bg-slate-200'}`}>
               <motion.div
                 className="h-full rounded-full"
                 style={{ backgroundColor: phaseColors[selectedPhase] }}
@@ -1623,11 +1552,11 @@ const GateProgressRing = ({ currentGate, selectedPhase, theme, onGateClick }: {
                 animate={{ width: `${(phaseProgress / phaseTotal) * 100}%` }}
               />
             </div>
-            <span className={`text-[7px] ${isDark ? 'text-teal-300' : 'text-teal-600'}`}>{phaseProgress}/{phaseTotal}</span>
+            <span className={`text-[8px] ${isDark ? 'text-teal-300' : 'text-slate-600'}`}>{phaseProgress}/{phaseTotal}</span>
           </div>
           <button
             onClick={() => onGateClick(currentGate)}
-            className={`w-full py-0.5 rounded text-[8px] font-medium transition-colors ${isDark ? 'bg-teal-950/20 hover:bg-teal-950/30 text-teal-300' : 'bg-white/60 hover:bg-white text-teal-700'}`}
+            className={`w-full py-1 rounded text-[9px] font-medium transition-colors ${isDark ? 'bg-teal-950/20 hover:bg-teal-950/30 text-teal-300' : 'bg-teal-100 hover:bg-teal-200 text-teal-700'}`}
           >
             Review →
           </button>
@@ -1638,7 +1567,7 @@ const GateProgressRing = ({ currentGate, selectedPhase, theme, onGateClick }: {
 };
 
 // ============ 3. ANIMATED TOKEN COUNTER - Flowing tokens ============
-const TokenCounterWidget = ({ selectedPhase, theme }: { selectedPhase: Phase; theme: ThemeMode }) => {
+const TokenCounterWidget = ({ selectedPhase, theme, expanded }: { selectedPhase: Phase; theme: ThemeMode; expanded?: boolean }) => {
   const isDark = theme === 'dark';
 
   // Simulated live token data (in real app, this would come from API)
@@ -1675,30 +1604,30 @@ const TokenCounterWidget = ({ selectedPhase, theme }: { selectedPhase: Phase; th
   const toCost = (tokens: number) => `$${(tokens * 0.0001).toFixed(2)}`;
 
   return (
-    <Panel theme={theme} className="p-1.5">
-      <div className="flex items-center justify-between mb-1">
-        <h3 className={`text-[8px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-700'}`}>Tokens</h3>
-        <div className={`flex items-center gap-0.5 px-1 py-0.5 rounded-full ${isDark ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
-          <motion.div className="w-1 h-1 rounded-full bg-emerald-500" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1, repeat: Infinity }} />
-          <span className={`text-[7px] font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{tokenData.rate}/s</span>
+    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <h3 className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Tokens</h3>
+        <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${isDark ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
+          <motion.div className="w-1.5 h-1.5 rounded-full bg-emerald-500" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+          <span className={`text-[8px] font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{tokenData.rate}/s</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-1">
-        <div className={`p-1 rounded ${isDark ? 'bg-slate-700/30' : 'bg-white/60'}`}>
-          <span className={`text-[6px] block ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Gate</span>
-          <span className={`text-xs font-bold font-mono ${isDark ? 'text-white' : 'text-teal-900'}`}>{formatTokens(animatedGate)}</span>
-          <span className={`text-[6px] block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{toCost(animatedGate)}</span>
+      <div className="grid grid-cols-3 gap-1.5">
+        <div className={`p-1.5 rounded ${isDark ? 'bg-slate-700/30' : 'bg-slate-100'}`}>
+          <span className={`text-[7px] block ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>Gate</span>
+          <span className={`text-sm font-bold font-mono ${isDark ? 'text-white' : 'text-slate-700'}`}>{formatTokens(animatedGate)}</span>
+          <span className={`text-[7px] block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{toCost(animatedGate)}</span>
         </div>
-        <div className={`p-1 rounded ${isDark ? 'bg-slate-700/30' : 'bg-white/60'}`}>
-          <span className={`text-[6px] block capitalize ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>{selectedPhase}</span>
-          <span className={`text-xs font-bold font-mono ${isDark ? 'text-white' : 'text-teal-900'}`}>{formatTokens(animatedPhase)}</span>
-          <span className={`text-[6px] block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{toCost(animatedPhase)}</span>
+        <div className={`p-1.5 rounded ${isDark ? 'bg-slate-700/30' : 'bg-slate-100'}`}>
+          <span className={`text-[7px] block capitalize ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>{selectedPhase}</span>
+          <span className={`text-sm font-bold font-mono ${isDark ? 'text-white' : 'text-slate-700'}`}>{formatTokens(animatedPhase)}</span>
+          <span className={`text-[7px] block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{toCost(animatedPhase)}</span>
         </div>
-        <div className={`p-1 rounded ${isDark ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20' : 'bg-teal-100'}`}>
-          <span className={`text-[6px] block ${isDark ? 'text-emerald-400' : 'text-teal-700'}`}>Total</span>
-          <span className={`text-xs font-bold font-mono ${isDark ? 'text-emerald-300' : 'text-teal-800'}`}>{formatTokens(animatedProject)}</span>
-          <span className={`text-[6px] block ${isDark ? 'text-emerald-300' : 'text-teal-600'}`}>{toCost(animatedProject)}</span>
+        <div className={`p-1.5 rounded ${isDark ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20' : 'bg-gradient-to-r from-emerald-100 to-teal-100'}`}>
+          <span className={`text-[7px] block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>Total</span>
+          <span className={`text-sm font-bold font-mono ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>{formatTokens(animatedProject)}</span>
+          <span className={`text-[7px] block ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>{toCost(animatedProject)}</span>
         </div>
       </div>
     </Panel>
@@ -1706,7 +1635,7 @@ const TokenCounterWidget = ({ selectedPhase, theme }: { selectedPhase: Phase; th
 };
 
 // ============ 4. PROGRESS MOMENTUM - Velocity metrics ============
-const MomentumWidget = ({ theme }: { theme: ThemeMode }) => {
+const MomentumWidget = ({ theme, expanded }: { theme: ThemeMode; expanded?: boolean }) => {
   const isDark = theme === 'dark';
 
   // Simulated momentum data
@@ -1721,48 +1650,48 @@ const MomentumWidget = ({ theme }: { theme: ThemeMode }) => {
   const isPositive = velocityChange >= 0;
 
   return (
-    <Panel theme={theme} className="p-1.5">
-      <div className="flex items-center justify-between mb-1">
-        <h3 className={`text-[8px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-700'}`}>Momentum</h3>
-        <div className={`flex items-center gap-0.5 px-1 py-0.5 rounded-full ${isDark ? 'bg-orange-500/20' : 'bg-orange-50'}`}>
-          <span className="text-[8px]">🔥</span>
-          <span className={`text-[7px] font-bold ${isDark ? 'text-orange-400' : 'text-orange-600'}`}>{momentum.streak}</span>
+    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <h3 className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Momentum</h3>
+        <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${isDark ? 'bg-orange-500/20' : 'bg-orange-100'}`}>
+          <span className="text-sm">🔥</span>
+          <span className={`text-[8px] font-bold ${isDark ? 'text-orange-400' : 'text-orange-600'}`}>{momentum.streak}</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-1 mb-1">
-        <div className={`flex-1 p-1 rounded ${isDark ? 'bg-slate-700/30' : 'bg-white/60'}`}>
-          <div className="flex items-center gap-0.5">
-            <span className="text-[9px]">⚡</span>
-            <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-teal-900'}`}>{momentum.velocity}</span>
-            <span className={`text-[6px] ${isDark ? 'text-teal-500' : 'text-teal-600'}`}>/hr</span>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <div className={`flex-1 p-1.5 rounded ${isDark ? 'bg-slate-700/30' : 'bg-slate-100'}`}>
+          <div className="flex items-center gap-1">
+            <span className="text-sm">⚡</span>
+            <span className={`text-base font-bold ${isDark ? 'text-white' : 'text-slate-700'}`}>{momentum.velocity}</span>
+            <span className={`text-[7px] ${isDark ? 'text-teal-500' : 'text-slate-500'}`}>/hr</span>
           </div>
         </div>
-        <div className={`flex-1 p-1 rounded ${isDark ? 'bg-slate-700/30' : 'bg-white/60'}`}>
-          <div className="flex items-center gap-0.5">
-            <span className="text-[9px]">{isPositive ? '📈' : '📉'}</span>
-            <span className={`text-sm font-bold ${isPositive ? 'text-emerald-500' : 'text-red-500'}`}>
+        <div className={`flex-1 p-1.5 rounded ${isDark ? 'bg-slate-700/30' : 'bg-slate-100'}`}>
+          <div className="flex items-center gap-1">
+            <span className="text-sm">{isPositive ? '📈' : '📉'}</span>
+            <span className={`text-base font-bold ${isPositive ? 'text-emerald-500' : 'text-red-500'}`}>
               {isPositive ? '+' : ''}{Math.round(velocityChange)}%
             </span>
           </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-1">
-        <span className={`text-[6px] ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Today</span>
+      <div className="flex items-center gap-1.5">
+        <span className={`text-[7px] ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>Today</span>
         <div className="flex-1 flex gap-0.5">
           {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className={`flex-1 h-1 rounded-sm ${i < momentum.todayTasks ? 'bg-gradient-to-t from-teal-500 to-emerald-400' : isDark ? 'bg-slate-700/50' : 'bg-teal-100'}`} />
+            <div key={i} className={`flex-1 h-1.5 rounded-sm ${i < momentum.todayTasks ? 'bg-gradient-to-t from-teal-500 to-emerald-400' : isDark ? 'bg-slate-700/50' : 'bg-slate-200'}`} />
           ))}
         </div>
-        <span className={`text-[7px] font-semibold ${isDark ? 'text-white' : 'text-teal-800'}`}>{momentum.todayTasks}</span>
+        <span className={`text-[8px] font-semibold ${isDark ? 'text-white' : 'text-slate-700'}`}>{momentum.todayTasks}</span>
       </div>
     </Panel>
   );
 };
 
 // ============ 5. LINES OF CODE - Code output metrics ============
-const LinesOfCodeWidget = ({ theme }: { theme: ThemeMode }) => {
+const LinesOfCodeWidget = ({ theme, expanded }: { theme: ThemeMode; expanded?: boolean }) => {
   const isDark = theme === 'dark';
 
   // Simulated LOC data
@@ -1784,159 +1713,33 @@ const LinesOfCodeWidget = ({ theme }: { theme: ThemeMode }) => {
   const animatedToday = useAnimatedCounter(locData.today, 1000);
 
   return (
-    <Panel theme={theme} className="p-1.5">
-      <div className="flex items-center justify-between mb-0.5">
-        <h3 className={`text-[8px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-700'}`}>Lines of Code</h3>
+    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
+      <div className="flex items-center justify-between mb-1">
+        <h3 className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Lines of Code</h3>
         <div className="flex items-baseline gap-1">
-          <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-teal-900'}`}>{animatedTotal.toLocaleString()}</span>
-          <span className={`text-[6px] ${isDark ? 'text-teal-500' : 'text-teal-600'}`}>total</span>
+          <span className={`text-base font-bold ${isDark ? 'text-white' : 'text-slate-700'}`}>{animatedTotal.toLocaleString()}</span>
+          <span className={`text-[7px] ${isDark ? 'text-teal-500' : 'text-slate-500'}`}>total</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-1 mb-1">
-        <div className={`flex-1 p-0.5 rounded text-center ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'}`}>
-          <span className={`text-[10px] font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>+{animatedToday}</span>
-          <span className={`text-[6px] ml-0.5 ${isDark ? 'text-emerald-500/70' : 'text-emerald-600/70'}`}>today</span>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <div className={`flex-1 p-1 rounded text-center ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-100'}`}>
+          <span className={`text-xs font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>+{animatedToday}</span>
+          <span className={`text-[7px] ml-0.5 ${isDark ? 'text-emerald-500/70' : 'text-emerald-500'}`}>today</span>
         </div>
-        <div className={`flex-1 p-0.5 rounded text-center ${isDark ? 'bg-blue-500/10' : 'bg-blue-50'}`}>
-          <span className={`text-[10px] font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>+{locData.added}</span>
-          <span className={`text-[6px] ml-0.5 ${isDark ? 'text-blue-500/70' : 'text-blue-600/70'}`}>add</span>
+        <div className={`flex-1 p-1 rounded text-center ${isDark ? 'bg-blue-500/10' : 'bg-blue-100'}`}>
+          <span className={`text-xs font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>+{locData.added}</span>
+          <span className={`text-[7px] ml-0.5 ${isDark ? 'text-blue-500/70' : 'text-blue-500'}`}>add</span>
         </div>
-        <div className={`flex-1 p-0.5 rounded text-center ${isDark ? 'bg-red-500/10' : 'bg-red-50'}`}>
-          <span className={`text-[10px] font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>-{locData.removed}</span>
-          <span className={`text-[6px] ml-0.5 ${isDark ? 'text-red-500/70' : 'text-red-600/70'}`}>del</span>
+        <div className={`flex-1 p-1 rounded text-center ${isDark ? 'bg-red-500/10' : 'bg-red-100'}`}>
+          <span className={`text-xs font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>-{locData.removed}</span>
+          <span className={`text-[7px] ml-0.5 ${isDark ? 'text-red-500/70' : 'text-red-500'}`}>del</span>
         </div>
       </div>
 
-      <div className="flex h-1 rounded-full overflow-hidden gap-0.5">
+      <div className="flex h-1.5 rounded-full overflow-hidden gap-0.5">
         {locData.byLanguage.map((lang) => (
           <div key={lang.lang} className={`${lang.color} rounded-sm`} style={{ width: `${lang.percent}%` }} title={`${lang.lang}: ${lang.percent}%`} />
-        ))}
-      </div>
-    </Panel>
-  );
-};
-
-// ============ 6. USER STATS - XP, Level, Lifetime metrics ============
-const UserStatsWidget = ({ theme }: { theme: ThemeMode }) => {
-  const isDark = theme === 'dark';
-
-  // Simulated user data
-  const [userData] = useState({
-    level: 12,
-    title: 'Senior Builder',
-    xp: 8450,
-    xpToNext: 10000,
-    totalProjects: 7,
-    projectsCompleted: 4,
-    totalLOC: 89420,
-    totalGatesPassed: 38,
-    joinDate: 'Mar 2024',
-  });
-
-  const xpProgress = (userData.xp / userData.xpToNext) * 100;
-  const animatedXP = useAnimatedCounter(userData.xp, 1200);
-  const animatedLOC = useAnimatedCounter(userData.totalLOC, 1500);
-
-  // Level titles
-  const getLevelInfo = (level: number) => {
-    if (level >= 20) return { title: 'Legendary', color: 'text-amber-400', bg: 'from-amber-500/20 to-orange-500/20' };
-    if (level >= 15) return { title: 'Master Builder', color: 'text-amber-400', bg: 'from-amber-500/20 to-orange-500/20' };
-    if (level >= 10) return { title: 'Senior Builder', color: 'text-cyan-400', bg: 'from-cyan-500/20 to-teal-500/20' };
-    if (level >= 5) return { title: 'Builder', color: 'text-emerald-400', bg: 'from-emerald-500/20 to-green-500/20' };
-    return { title: 'Apprentice', color: 'text-slate-400', bg: 'from-slate-500/20 to-slate-600/20' };
-  };
-
-  const levelInfo = getLevelInfo(userData.level);
-
-  return (
-    <Panel theme={theme} className="p-1.5">
-      {/* Level & XP Header - Compact inline */}
-      <div className={`flex items-center gap-2 p-1 rounded-lg bg-gradient-to-r ${isDark ? levelInfo.bg : 'from-teal-100 to-cyan-100'} mb-1`}>
-        <div className="relative">
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-xs border-2 ${isDark ? 'bg-gradient-to-br from-teal-500 to-cyan-600 border-teal-400/50' : 'bg-gradient-to-br from-teal-500 to-cyan-500 border-teal-400/50'}`}>
-            {userData.level}
-          </div>
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className={`text-[9px] font-bold ${isDark ? levelInfo.color : 'text-teal-700'}`}>{levelInfo.title}</p>
-          <div className="flex items-center gap-1">
-            <div className={`flex-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/50' : 'bg-teal-200'}`}>
-              <motion.div
-                className="h-full rounded-full bg-gradient-to-r from-teal-500 to-cyan-400"
-                initial={{ width: 0 }}
-                animate={{ width: `${xpProgress}%` }}
-                transition={{ duration: 1, delay: 0.3 }}
-              />
-            </div>
-            <span className={`text-[7px] ${isDark ? 'text-teal-300' : 'text-teal-600'}`}>{animatedXP.toLocaleString()}/{userData.xpToNext.toLocaleString()}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Lifetime Stats Grid - 4 columns inline */}
-      <div className="grid grid-cols-4 gap-1">
-        <div className={`p-1 rounded text-center ${isDark ? 'bg-slate-700/30' : 'bg-white/60'}`}>
-          <div className={`text-sm font-bold ${isDark ? 'text-white' : 'text-teal-900'}`}>{userData.totalProjects}</div>
-          <div className={`text-[6px] ${isDark ? 'text-slate-400' : 'text-teal-600'}`}>Projects</div>
-        </div>
-        <div className={`p-1 rounded text-center ${isDark ? 'bg-slate-700/30' : 'bg-white/60'}`}>
-          <div className="text-sm font-bold text-emerald-500">{userData.projectsCompleted}</div>
-          <div className={`text-[6px] ${isDark ? 'text-slate-400' : 'text-teal-600'}`}>Shipped</div>
-        </div>
-        <div className={`p-1 rounded text-center ${isDark ? 'bg-slate-700/30' : 'bg-white/60'}`}>
-          <div className={`text-sm font-bold ${isDark ? 'text-white' : 'text-teal-900'}`}>{(animatedLOC / 1000).toFixed(0)}k</div>
-          <div className={`text-[6px] ${isDark ? 'text-slate-400' : 'text-teal-600'}`}>LOC</div>
-        </div>
-        <div className={`p-1 rounded text-center ${isDark ? 'bg-slate-700/30' : 'bg-white/60'}`}>
-          <div className={`text-sm font-bold ${isDark ? 'text-white' : 'text-teal-900'}`}>{userData.totalGatesPassed}</div>
-          <div className={`text-[6px] ${isDark ? 'text-slate-400' : 'text-teal-600'}`}>Gates</div>
-        </div>
-      </div>
-    </Panel>
-  );
-};
-
-// ============ 7. ACHIEVEMENTS - Badge collection ============
-const AchievementsWidget = ({ theme }: { theme: ThemeMode }) => {
-  const isDark = theme === 'dark';
-
-  const achievements = [
-    { id: 'first-gate', name: 'First Steps', icon: '🚀', desc: 'Pass your first gate', unlocked: true },
-    { id: 'speed-demon', name: 'Speed Demon', icon: '⚡', desc: 'Complete a gate in under 1 hour', unlocked: true },
-    { id: 'clean-code', name: 'Clean Code', icon: '✨', desc: '5 gates without rejection', unlocked: true },
-    { id: 'night-owl', name: 'Night Owl', icon: '🦉', desc: 'Code after midnight', unlocked: true },
-    { id: 'shipper', name: 'Shipper', icon: '📦', desc: 'Ship your first project', unlocked: true },
-    { id: 'prolific', name: 'Prolific', icon: '📚', desc: 'Write 10k lines of code', unlocked: true },
-    { id: 'architect', name: 'Architect', icon: '🏗️', desc: 'Complete 10 architecture gates', unlocked: false },
-    { id: 'legend', name: 'Legend', icon: '👑', desc: 'Reach level 20', unlocked: false },
-  ];
-
-  const unlockedCount = achievements.filter(a => a.unlocked).length;
-
-  return (
-    <Panel theme={theme} className="p-1.5">
-      <div className="flex items-center justify-between mb-1">
-        <h3 className={`text-[8px] font-semibold uppercase tracking-wider ${isDark ? 'text-amber-400' : 'text-teal-700'}`}>Achievements</h3>
-        <span className={`text-[7px] ${isDark ? 'text-amber-300' : 'text-teal-600'}`}>{unlockedCount}/{achievements.length}</span>
-      </div>
-
-      <div className="grid grid-cols-8 gap-0.5">
-        {achievements.map((achievement) => (
-          <motion.div
-            key={achievement.id}
-            whileHover={{ scale: 1.1 }}
-            className={`relative aspect-square rounded flex items-center justify-center cursor-pointer transition-all ${
-              achievement.unlocked
-                ? isDark ? 'bg-gradient-to-br from-amber-500/30 to-yellow-500/30' : 'bg-gradient-to-br from-amber-100 to-yellow-100'
-                : `${isDark ? 'bg-slate-800/50' : 'bg-white/40'} opacity-40`
-            }`}
-            title={`${achievement.name}: ${achievement.desc}`}
-          >
-            <span className={`text-sm ${achievement.unlocked ? '' : 'grayscale'}`}>
-              {achievement.icon}
-            </span>
-          </motion.div>
         ))}
       </div>
     </Panel>
@@ -1958,21 +1761,21 @@ const PhaseSelector = ({ currentPhase, selectedPhase, onPhaseSelect, theme }: {
   ];
 
   return (
-    <Panel theme={theme} className="p-1">
-      <div className="flex gap-0.5">
+    <Panel theme={theme} className="p-1.5">
+      <div className="flex gap-1">
         {phases.map((p) => (
           <button
             key={p.id}
             onClick={() => onPhaseSelect(p.id)}
-            className={`flex-1 text-center py-0.5 px-1 rounded transition-all cursor-pointer ${
+            className={`flex-1 text-center py-1 px-2 rounded transition-all cursor-pointer ${
               selectedPhase === p.id
-                ? 'bg-teal-600 shadow-md'
+                ? 'bg-teal-600 shadow-md text-white'
                 : currentPhase === p.id
                   ? isDark ? 'bg-teal-950/30 ring-1 ring-teal-500/50' : 'bg-teal-100 ring-1 ring-teal-300'
-                  : `${isDark ? 'bg-slate-700/30 hover:bg-slate-700/50' : 'bg-white/60 hover:bg-white'}`
+                  : `${isDark ? 'bg-slate-700/30 hover:bg-slate-700/50' : 'bg-slate-100 hover:bg-slate-200'}`
             }`}
           >
-            <div className={`text-[9px] font-medium ${selectedPhase === p.id ? 'text-white' : isDark ? 'text-teal-300' : 'text-teal-700'}`}>{p.label}</div>
+            <div className={`text-[10px] font-medium ${selectedPhase === p.id ? 'text-white' : isDark ? 'text-teal-300' : 'text-slate-600'}`}>{p.label}</div>
           </button>
         ))}
       </div>
@@ -1984,41 +1787,342 @@ const PhaseSelector = ({ currentPhase, selectedPhase, onPhaseSelect, theme }: {
 
 const ProjectsView = ({ theme, onSelectProject }: { theme: ThemeMode; onSelectProject: (name: string) => void }) => {
   const isDark = theme === 'dark';
+  const [selectedProject, setSelectedProject] = useState<string | null>('1');
+
   const projects = [
-    { id: '1', name: 'E-Commerce Platform', status: 'active', gate: 4, progress: 40 },
-    { id: '2', name: 'Mobile App Backend', status: 'active', gate: 2, progress: 20 },
-    { id: '3', name: 'Analytics Dashboard', status: 'completed', gate: 9, progress: 100 },
+    {
+      id: '1',
+      name: 'E-Commerce Platform',
+      status: 'active',
+      gate: 4,
+      progress: 40,
+      description: 'A full-featured e-commerce platform with product catalog, shopping cart, checkout flow, and payment processing integration.',
+      tech: ['React', 'Node.js', 'PostgreSQL', 'Stripe'],
+      lastUpdated: '2 hours ago',
+      agents: 3,
+      filesGenerated: 47,
+      linesOfCode: 12450
+    },
+    {
+      id: '2',
+      name: 'Mobile App Backend',
+      status: 'active',
+      gate: 2,
+      progress: 20,
+      description: 'RESTful API backend for a mobile fitness tracking application with user authentication and workout logging.',
+      tech: ['NestJS', 'MongoDB', 'Redis', 'JWT'],
+      lastUpdated: '1 day ago',
+      agents: 2,
+      filesGenerated: 23,
+      linesOfCode: 5840
+    },
+    {
+      id: '3',
+      name: 'Analytics Dashboard',
+      status: 'completed',
+      gate: 9,
+      progress: 100,
+      description: 'Real-time analytics dashboard with interactive charts, data visualization, and exportable reports.',
+      tech: ['Vue.js', 'D3.js', 'FastAPI', 'ClickHouse'],
+      lastUpdated: '1 week ago',
+      agents: 4,
+      filesGenerated: 89,
+      linesOfCode: 24780
+    },
   ];
 
+  // User lifetime stats
+  const userData = {
+    level: 12,
+    title: 'Senior Builder',
+    xp: 8450,
+    xpToNext: 10000,
+    totalProjects: 7,
+    projectsCompleted: 4,
+    totalLOC: 89420,
+    totalGatesPassed: 38,
+  };
+
+  const achievements = [
+    { id: 'first-gate', name: 'First Steps', icon: '🚀', desc: 'Pass your first gate', unlocked: true },
+    { id: 'speed-demon', name: 'Speed Demon', icon: '⚡', desc: 'Complete a gate in under 1 hour', unlocked: true },
+    { id: 'clean-code', name: 'Clean Code', icon: '✨', desc: '5 gates without rejection', unlocked: true },
+    { id: 'night-owl', name: 'Night Owl', icon: '🦉', desc: 'Code after midnight', unlocked: true },
+    { id: 'shipper', name: 'Shipper', icon: '📦', desc: 'Ship your first project', unlocked: true },
+    { id: 'prolific', name: 'Prolific', icon: '📚', desc: 'Write 10k lines of code', unlocked: true },
+    { id: 'architect', name: 'Architect', icon: '🏗️', desc: 'Complete 10 architecture gates', unlocked: false },
+    { id: 'legend', name: 'Legend', icon: '👑', desc: 'Reach level 20', unlocked: false },
+  ];
+
+  const xpProgress = (userData.xp / userData.xpToNext) * 100;
+  const unlockedCount = achievements.filter(a => a.unlocked).length;
+  const selectedProjectData = projects.find(p => p.id === selectedProject);
+
+  const getLevelInfo = (level: number) => {
+    if (level >= 20) return { title: 'Legendary', color: 'text-amber-400', bg: 'from-amber-500/20 to-orange-500/20' };
+    if (level >= 15) return { title: 'Master Builder', color: 'text-amber-400', bg: 'from-amber-500/20 to-orange-500/20' };
+    if (level >= 10) return { title: 'Senior Builder', color: 'text-cyan-400', bg: 'from-cyan-500/20 to-teal-500/20' };
+    if (level >= 5) return { title: 'Builder', color: 'text-emerald-400', bg: 'from-emerald-500/20 to-green-500/20' };
+    return { title: 'Apprentice', color: 'text-slate-400', bg: 'from-slate-500/20 to-slate-600/20' };
+  };
+
+  const levelInfo = getLevelInfo(userData.level);
+
+  const handleProjectSelect = (projectId: string) => {
+    setSelectedProject(projectId);
+    const project = projects.find(p => p.id === projectId);
+    if (project) {
+      onSelectProject(project.name);
+    }
+  };
+
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-teal-800'}`}>Projects</h2>
-        <button className={`px-4 py-2 text-white rounded-full text-sm font-medium transition-colors ${isDark ? 'bg-teal-950 hover:bg-teal-400' : 'bg-teal-600 hover:bg-teal-700'}`}>
-          + New Project
-        </button>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {projects.map((project) => (
-          <Panel
-            key={project.id}
-            theme={theme}
-            className="p-4 cursor-pointer hover:border-teal-500/50 transition-colors"
-          >
-            <div onClick={() => onSelectProject(project.name)}>
-              <h3 className={`font-semibold mb-2 ${isDark ? 'text-white' : 'text-teal-800'}`}>{project.name}</h3>
-              <div className="flex items-center gap-2 mb-3">
-                <span className={`text-xs px-2 py-0.5 rounded-full ${project.status === 'completed' ? isDark ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-700' : isDark ? 'bg-teal-950/20 text-teal-300' : 'bg-teal-50 text-teal-700'}`}>
-                  {project.status === 'completed' ? 'Completed' : `Gate ${project.gate}`}
-                </span>
-              </div>
-              <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
-                <div className={`h-full rounded-full ${isDark ? 'bg-teal-950' : 'bg-teal-500'}`} style={{ width: `${project.progress}%` }} />
-              </div>
-              <div className={`text-xs mt-2 ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>{project.progress}% complete</div>
+    <div className="h-full flex flex-col p-4 gap-4">
+      {/* Top Section - Lifetime Metrics & Achievements */}
+      <div className={`rounded-xl border p-4 ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'}`}>
+        <div className="flex items-center gap-6">
+          {/* Level & XP */}
+          <div className={`flex items-center gap-3 px-4 py-2 rounded-xl bg-gradient-to-r ${levelInfo.bg}`}>
+            <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg border-2 bg-gradient-to-br from-teal-500 to-cyan-600 border-teal-400/50">
+              {userData.level}
             </div>
-          </Panel>
-        ))}
+            <div className="min-w-[120px]">
+              <p className={`text-sm font-bold ${levelInfo.color}`}>{levelInfo.title}</p>
+              <div className="flex items-center gap-2">
+                <div className={`flex-1 h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/50' : 'bg-slate-200'}`}>
+                  <motion.div
+                    className="h-full rounded-full bg-gradient-to-r from-teal-500 to-cyan-400"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${xpProgress}%` }}
+                    transition={{ duration: 1, delay: 0.3 }}
+                  />
+                </div>
+                <span className={`text-xs ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>{userData.xp.toLocaleString()}/{userData.xpToNext.toLocaleString()} XP</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Lifetime Stats */}
+          <div className="flex items-center gap-4">
+            <div className={`px-4 py-2 rounded-lg text-center ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+              <div className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{userData.totalProjects}</div>
+              <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Projects</div>
+            </div>
+            <div className={`px-4 py-2 rounded-lg text-center ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+              <div className={`text-xl font-bold ${isDark ? 'text-emerald-500' : 'text-emerald-600'}`}>{userData.projectsCompleted}</div>
+              <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Shipped</div>
+            </div>
+            <div className={`px-4 py-2 rounded-lg text-center ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+              <div className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{(userData.totalLOC / 1000).toFixed(0)}k</div>
+              <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Lines of Code</div>
+            </div>
+            <div className={`px-4 py-2 rounded-lg text-center ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+              <div className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{userData.totalGatesPassed}</div>
+              <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Gates Passed</div>
+            </div>
+          </div>
+
+          {/* Achievements */}
+          <div className="flex-1">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-amber-400">Achievements</span>
+              <span className="text-xs text-amber-300">{unlockedCount}/{achievements.length}</span>
+            </div>
+            <div className="flex gap-1">
+              {achievements.map((achievement) => (
+                <motion.div
+                  key={achievement.id}
+                  whileHover={{ scale: 1.15 }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all ${
+                    achievement.unlocked
+                      ? 'bg-gradient-to-br from-amber-500/30 to-yellow-500/30'
+                      : `${isDark ? 'bg-slate-800/50' : 'bg-slate-400/40'} opacity-40`
+                  }`}
+                  title={`${achievement.name}: ${achievement.desc}`}
+                >
+                  <span className={`text-lg ${achievement.unlocked ? '' : 'grayscale'}`}>
+                    {achievement.icon}
+                  </span>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content - Project List + Description */}
+      <div className="flex-1 flex gap-4 min-h-0">
+        {/* Left - Project List */}
+        <div className={`w-80 flex-shrink-0 rounded-xl border ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'} flex flex-col`}>
+          <div className={`p-4 border-b flex items-center justify-between ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+            <h2 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Projects</h2>
+            <button className="px-3 py-1.5 text-white rounded-lg text-sm font-medium transition-colors bg-teal-600 hover:bg-teal-500">
+              + New
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {projects.map((project) => (
+              <motion.div
+                key={project.id}
+                whileHover={{ scale: 1.01 }}
+                onClick={() => handleProjectSelect(project.id)}
+                className={`p-3 rounded-lg mb-2 cursor-pointer transition-all ${
+                  selectedProject === project.id
+                    ? isDark ? 'bg-teal-900/50 border border-teal-500/50' : 'bg-teal-50 border border-teal-300'
+                    : isDark ? 'hover:bg-slate-700/50' : 'hover:bg-slate-100'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className={`font-semibold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{project.name}</h3>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${
+                    project.status === 'completed'
+                      ? 'bg-emerald-500/30 text-emerald-300'
+                      : 'bg-teal-500/30 text-teal-200'
+                  }`}>
+                    {project.status === 'completed' ? 'Shipped' : `Gate ${project.gate}/9`}
+                  </span>
+                </div>
+                <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      project.status === 'completed' ? 'bg-emerald-500' : 'bg-teal-500'
+                    }`}
+                    style={{ width: `${project.progress}%` }}
+                  />
+                </div>
+                <div className={`text-xs mt-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  Updated {project.lastUpdated}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
+        {/* Right - Project Description */}
+        <div className={`flex-1 rounded-xl border ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200 shadow-sm'} flex flex-col`}>
+          {selectedProjectData ? (
+            <>
+              <div className={`p-6 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className={`text-2xl font-bold mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      {selectedProjectData.name}
+                    </h2>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-sm px-3 py-1 rounded-full ${
+                        selectedProjectData.status === 'completed'
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : 'bg-teal-500/20 text-teal-300'
+                      }`}>
+                        {selectedProjectData.status === 'completed' ? '✓ Shipped' : `Gate ${selectedProjectData.gate} of 9`}
+                      </span>
+                      <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        Updated {selectedProjectData.lastUpdated}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onSelectProject(selectedProjectData.name)}
+                    className="px-4 py-2 rounded-lg font-medium transition-colors bg-teal-600 hover:bg-teal-500 text-white"
+                  >
+                    Open Workspace
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 p-6 overflow-y-auto">
+                {/* Description */}
+                <div className="mb-6">
+                  <h3 className={`text-sm font-semibold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Description
+                  </h3>
+                  <p className={`text-base leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                    {selectedProjectData.description}
+                  </p>
+                </div>
+
+                {/* Tech Stack */}
+                <div className="mb-6">
+                  <h3 className={`text-sm font-semibold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Tech Stack
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedProjectData.tech.map((tech) => (
+                      <span
+                        key={tech}
+                        className={`px-3 py-1 rounded-full text-sm ${
+                          isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {tech}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Project Stats */}
+                <div className="mb-6">
+                  <h3 className={`text-sm font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Project Stats
+                  </h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className={`p-4 rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+                      <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        {selectedProjectData.agents}
+                      </div>
+                      <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Active Agents</div>
+                    </div>
+                    <div className={`p-4 rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+                      <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        {selectedProjectData.filesGenerated}
+                      </div>
+                      <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Files Generated</div>
+                    </div>
+                    <div className={`p-4 rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+                      <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        {selectedProjectData.linesOfCode.toLocaleString()}
+                      </div>
+                      <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Lines of Code</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress */}
+                <div>
+                  <h3 className={`text-sm font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Progress
+                  </h3>
+                  <div className={`p-4 rounded-xl ${isDark ? 'bg-slate-700/50' : 'bg-slate-100'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-sm font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        Overall Completion
+                      </span>
+                      <span className={`text-sm font-bold ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
+                        {selectedProjectData.progress}%
+                      </span>
+                    </div>
+                    <div className={`h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`}>
+                      <motion.div
+                        className={`h-full rounded-full ${
+                          selectedProjectData.status === 'completed' ? 'bg-emerald-500' : 'bg-teal-500'
+                        }`}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${selectedProjectData.progress}%` }}
+                        transition={{ duration: 0.8 }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <p className={`text-lg ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Select a project to view details
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2030,7 +2134,9 @@ export default function UnifiedDashboard() {
   const [showSplash, setShowSplash] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('docs');
   const [mainView, setMainView] = useState<MainView>('dashboard');
-  const [theme, setTheme] = useState<ThemeMode>('dark');
+  const themeFromStore = useThemeStore((state) => state.theme);
+  const user = useAuthStore((state) => state.user);
+  const theme: ThemeMode = themeFromStore === 'dark' ? 'dark' : 'light';
   const [showGitHub, setShowGitHub] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showGateApproval, setShowGateApproval] = useState(false);
@@ -2077,11 +2183,11 @@ export default function UnifiedDashboard() {
     <div className={`h-screen flex flex-col overflow-hidden ${
       isDark
         ? 'bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 text-white'
-        : 'bg-teal-100 text-slate-800'
+        : 'bg-slate-100 text-slate-900'
     }`}>
       {/* Popups */}
       <GitHubPopup isOpen={showGitHub} onClose={() => setShowGitHub(false)} theme={theme} />
-      <SettingsPopup isOpen={showSettings} onClose={() => setShowSettings(false)} theme={theme} onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} />
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
       <GateApprovalPopup
         isOpen={showGateApproval}
         onClose={() => setShowGateApproval(false)}
@@ -2093,26 +2199,26 @@ export default function UnifiedDashboard() {
 
       {/* Header */}
       <header className={`relative h-14 border-b flex items-center px-4 z-10 ${
-        isDark ? 'border-slate-700/50 bg-slate-900/80' : 'border-teal-900 bg-teal-800'
+        isDark ? 'border-slate-700/50 bg-slate-900/80' : 'border-teal-700 bg-teal-600'
       } backdrop-blur-xl`}>
         {/* Left Section - Logo & Navigation */}
         <div className="flex items-center gap-3">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center overflow-hidden ${isDark ? 'bg-teal-950' : 'bg-teal-600'}`}>
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center overflow-hidden ${isDark ? 'bg-teal-950' : 'bg-white/20'}`}>
               <img src={FuzzyLlamaLogoSvg} alt="Fuzzy Llama" className="w-7 h-7" />
             </div>
-            <span className={`font-bold text-sm ${isDark ? 'text-white' : 'text-white'}`}>Fuzzy Llama</span>
+            <span className="font-bold text-sm text-white">Fuzzy Llama</span>
           </div>
 
           {/* Main Navigation */}
-          <div className={`flex items-center gap-1 p-1 rounded-full ${isDark ? 'bg-slate-800/50' : 'bg-teal-900/50'}`}>
+          <div className={`flex items-center gap-1 p-1 rounded-full ${isDark ? 'bg-slate-800/50' : 'bg-teal-700/50'}`}>
             <button
               onClick={() => setMainView('dashboard')}
               className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
                 mainView === 'dashboard'
-                  ? isDark ? 'bg-teal-950 text-white' : 'bg-white text-teal-800'
-                  : isDark ? 'text-teal-300 hover:text-white' : 'text-teal-200 hover:text-white'
+                  ? isDark ? 'bg-teal-950 text-white' : 'bg-white text-teal-700'
+                  : isDark ? 'text-teal-300 hover:text-white' : 'text-teal-100 hover:text-white'
               }`}
             >
               Dashboard
@@ -2121,8 +2227,8 @@ export default function UnifiedDashboard() {
               onClick={() => setMainView('projects')}
               className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
                 mainView === 'projects'
-                  ? isDark ? 'bg-teal-950 text-white' : 'bg-white text-teal-800'
-                  : isDark ? 'text-teal-300 hover:text-white' : 'text-teal-200 hover:text-white'
+                  ? isDark ? 'bg-teal-950 text-white' : 'bg-white text-teal-700'
+                  : isDark ? 'text-teal-300 hover:text-white' : 'text-teal-100 hover:text-white'
               }`}
             >
               Projects
@@ -2134,8 +2240,8 @@ export default function UnifiedDashboard() {
         <div className="flex-1 flex justify-center">
           {mainView === 'dashboard' && (
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-medium ${isDark ? 'text-teal-400' : 'text-teal-300'}`}>Project:</span>
-              <span className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-white'}`}>{currentProjectName}</span>
+              <span className={`text-xs font-medium ${isDark ? 'text-teal-400' : 'text-teal-200'}`}>Project:</span>
+              <span className="text-sm font-semibold text-white">{currentProjectName}</span>
             </div>
           )}
         </div>
@@ -2146,7 +2252,7 @@ export default function UnifiedDashboard() {
           <button
             onClick={() => setShowGitHub(true)}
             className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-              isDark ? 'bg-slate-700/50 hover:bg-slate-700 text-white' : 'bg-teal-900/50 hover:bg-teal-900 text-white'
+              isDark ? 'bg-slate-700/50 hover:bg-slate-700 text-white' : 'bg-teal-700/50 hover:bg-teal-700 text-white'
             }`}
           >
             <GitHubIcon className="w-4 h-4" />
@@ -2155,9 +2261,9 @@ export default function UnifiedDashboard() {
           {/* Profile Avatar */}
           <button
             onClick={() => setShowSettings(true)}
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${isDark ? 'bg-teal-950' : 'bg-teal-600'}`}
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${isDark ? 'bg-teal-950' : 'bg-teal-700'}`}
           >
-            JD
+            {user?.name?.charAt(0).toUpperCase() || 'U'}
           </button>
         </div>
       </header>
@@ -2189,7 +2295,7 @@ export default function UnifiedDashboard() {
             />
           </motion.div>
 
-          {/* Right Panel - Metrics Widgets (Hidden when expanded) */}
+          {/* Right Panel - Project Metrics (Hidden when expanded) */}
           <AnimatePresence>
             {!isCenterExpanded && (
               <motion.div
@@ -2197,12 +2303,12 @@ export default function UnifiedDashboard() {
                 animate={{ width: 340, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
                 transition={{ duration: 0.3, ease: 'easeInOut' }}
-                className={`w-[340px] min-w-[320px] pl-1 h-full flex flex-col justify-between p-2 ${isDark ? 'bg-slate-900/30' : ''}`}
+                className={`w-[340px] min-w-[320px] pl-1 h-full flex flex-col p-2 ${isDark ? 'bg-slate-900/30' : ''}`}
               >
                 {/* ===== PROJECT METRICS SECTION ===== */}
-                <div className="flex flex-col gap-1">
-                  <div className={`px-2 py-1 rounded ${isDark ? 'bg-teal-500/10' : 'bg-teal-800'}`}>
-                    <h4 className={`text-[8px] font-bold uppercase tracking-widest text-center ${isDark ? 'text-teal-400' : 'text-white'}`}>Project Metrics</h4>
+                <div className="flex flex-col gap-2 h-full">
+                  <div className={`px-2 py-1.5 rounded flex-shrink-0 ${isDark ? 'bg-teal-500/10' : 'bg-teal-100'}`}>
+                    <h4 className={`text-[9px] font-bold uppercase tracking-widest text-center ${isDark ? 'text-teal-400' : 'text-teal-700'}`}>Project Metrics</h4>
                   </div>
                   <PhaseSelector
                     currentPhase={currentPhase}
@@ -2210,25 +2316,17 @@ export default function UnifiedDashboard() {
                     onPhaseSelect={setSelectedPhase}
                     theme={theme}
                   />
-                  <TeamWidget phase={selectedPhase} theme={theme} />
+                  <TeamWidget phase={selectedPhase} theme={theme} expanded />
                   <GateProgressRing
                     currentGate={currentGate}
                     selectedPhase={selectedPhase}
                     theme={theme}
                     onGateClick={() => setShowGateApproval(true)}
+                    expanded
                   />
-                  <TokenCounterWidget selectedPhase={selectedPhase} theme={theme} />
-                  <MomentumWidget theme={theme} />
-                  <LinesOfCodeWidget theme={theme} />
-                </div>
-
-                {/* ===== USER METRICS SECTION ===== */}
-                <div className="flex flex-col gap-1">
-                  <div className={`px-2 py-1 rounded ${isDark ? 'bg-amber-500/10' : 'bg-teal-800'}`}>
-                    <h4 className={`text-[8px] font-bold uppercase tracking-widest text-center ${isDark ? 'text-amber-400' : 'text-white'}`}>Lifetime Stats</h4>
-                  </div>
-                  <UserStatsWidget theme={theme} />
-                  <AchievementsWidget theme={theme} />
+                  <TokenCounterWidget selectedPhase={selectedPhase} theme={theme} expanded />
+                  <MomentumWidget theme={theme} expanded />
+                  <LinesOfCodeWidget theme={theme} expanded />
                 </div>
               </motion.div>
             )}

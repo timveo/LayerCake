@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/auth';
 import { useThemeStore } from '../../stores/theme';
+import FuzzyLlamaLogo from '../../assets/Llamalogo.png';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -29,12 +30,10 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         <div className="h-full px-4 flex items-center justify-between">
           {/* Left: Logo + Nav */}
           <div className="flex items-center gap-6">
-            <Link to="/dashboard" className="flex items-center gap-2 group">
-              <div className="w-8 h-8 bg-gradient-to-br from-primary-500 to-accent-600 rounded-lg flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow">
-                <span className="text-lg">🎂</span>
-              </div>
+            <Link to="/home" className="flex items-center gap-2 group">
+              <img src={FuzzyLlamaLogo} alt="Fuzzy Llama" className="w-8 h-8" />
               <span className="font-bold text-lg text-light-text-primary dark:text-dark-text-primary">
-                FuzzyLlama
+                Fuzzy Llama
               </span>
             </Link>
 

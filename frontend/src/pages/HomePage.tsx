@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useThemeStore } from '../stores/theme';
 import { useAuthStore } from '../stores/auth';
+import { SettingsModal } from '../components/SettingsModal';
 import FuzzyLlamaLogo from '../assets/Llamalogo.png';
 import FuzzyLlamaLogoTransparent from '../assets/Llamalogo-transparent.png';
 
@@ -30,6 +31,7 @@ const HomePage = () => {
   const { user, logout } = useAuthStore();
   const isDark = theme === 'dark';
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [promptValue, setPromptValue] = useState('');
 
   const handlePromptSubmit = () => {
@@ -46,8 +48,11 @@ const HomePage = () => {
 
   return (
     <div className="h-screen w-screen flex overflow-hidden">
+      {/* Settings Modal */}
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
       {/* Sidebar */}
-      <div className={`w-56 flex flex-col ${isDark ? 'bg-slate-900' : 'bg-teal-800'} text-white`}>
+      <div className={`w-56 flex flex-col ${isDark ? 'bg-slate-900' : 'bg-slate-900'} text-white`}>
         {/* Logo */}
         <div className="p-4 flex items-center gap-3">
           <img src={FuzzyLlamaLogo} alt="Fuzzy Llama" className="w-16 h-16" />
@@ -56,44 +61,44 @@ const HomePage = () => {
 
         {/* Workspace Selector */}
         <div className="px-3 mb-4">
-          <button className={`w-full flex items-center justify-between px-3 py-2 rounded-lg ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-teal-700 hover:bg-teal-600'} transition-colors`}>
+          <button className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 bg-teal-600 rounded text-xs flex items-center justify-center font-bold">
                 {user?.name?.charAt(0) || 'U'}
               </div>
               <span className="text-sm">{user?.name || 'User'}'s Space</span>
             </div>
-            <ChevronDown className={`w-4 h-4 ${isDark ? 'text-slate-400' : 'text-teal-300'}`} />
+            <ChevronDown className="w-4 h-4 text-slate-400" />
           </button>
         </div>
 
         {/* Navigation */}
         <nav className="flex-1 px-3 space-y-1">
-          <NavItem icon={Home} label="Home" active isDark={isDark} />
+          <NavItem icon={Home} label="Home" active isDark={true} />
 
           <div className="pt-4 pb-2">
-            <span className={`px-3 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-teal-300'} uppercase tracking-wider`}>Projects</span>
+            <span className="px-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Projects</span>
           </div>
-          <NavItem icon={FolderOpen} label="Projects" onClick={() => navigate('/dashboard')} isDark={isDark} />
-          <NavItem icon={Plus} label="New project" onClick={() => navigate('/projects/new')} isDark={isDark} />
+          <NavItem icon={FolderOpen} label="Projects" onClick={() => navigate('/dashboard')} isDark={true} />
+          <NavItem icon={Plus} label="New project" onClick={() => navigate('/projects/new')} isDark={true} />
 
           <div className="pt-4 pb-2">
-            <span className={`px-3 text-xs font-medium ${isDark ? 'text-slate-500' : 'text-teal-300'} uppercase tracking-wider`}>Workspace</span>
+            <span className="px-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Workspace</span>
           </div>
-          <NavItem icon={Layout} label="Workspace" onClick={() => navigate('/workspace')} isDark={isDark} />
-          <NavItem icon={Settings} label="Settings" onClick={() => navigate('/settings')} isDark={isDark} />
+          <NavItem icon={Layout} label="Workspace" onClick={() => navigate('/workspace')} isDark={true} />
+          <NavItem icon={Settings} label="Settings" onClick={() => setShowSettings(true)} isDark={true} />
         </nav>
 
         {/* Bottom Section */}
         <div className="p-3 space-y-2">
           {/* Share CTA */}
-          <div className={`p-3 rounded-lg ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-teal-700/50 border-teal-600'} border`}>
+          <div className="p-3 rounded-lg bg-slate-800/50 border-slate-700 border">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium">Share Fuzzy Llama</p>
-                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-teal-300'}`}>Get 10 credits each</p>
+                <p className="text-xs text-slate-400">Get 10 credits each</p>
               </div>
-              <Gift className={`w-5 h-5 ${isDark ? 'text-slate-400' : 'text-teal-300'}`} />
+              <Gift className="w-5 h-5 text-slate-400" />
             </div>
           </div>
 
@@ -101,7 +106,7 @@ const HomePage = () => {
           <div className="relative">
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className={`w-full flex items-center gap-2 p-2 rounded-lg ${isDark ? 'hover:bg-slate-800' : 'hover:bg-teal-700'} transition-colors`}
+              className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-800 transition-colors"
             >
               <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
                 {user?.name?.charAt(0) || 'U'}
@@ -128,7 +133,7 @@ const HomePage = () => {
                   </div>
                 </div>
                 <div className="p-2">
-                  <MenuButton icon={Settings} label="Settings" onClick={() => navigate('/settings')} />
+                  <MenuButton icon={Settings} label="Settings" onClick={() => { setShowUserMenu(false); setShowSettings(true); }} />
                   <MenuButton
                     icon={isDark ? Sun : Moon}
                     label="Appearance"
@@ -154,7 +159,7 @@ const HomePage = () => {
           style={{
             background: isDark
               ? 'radial-gradient(ellipse at 50% 30%, #1e574f 0%, #1e3a5f 40%, #1a365d 70%, #1e293b 100%)'
-              : 'radial-gradient(ellipse at 50% 20%, #99f6e4 0%, #5eead4 20%, #2dd4bf 40%, #14b8a6 60%, #0d9488 80%, #0f766e 100%)',
+              : 'radial-gradient(ellipse at 50% 30%, #134e4a 0%, #164e63 40%, #1e3a5f 70%, #1e293b 100%)',
           }}
         />
 
@@ -164,7 +169,7 @@ const HomePage = () => {
           style={{
             background: isDark
               ? 'radial-gradient(circle at 30% 40%, rgba(20, 184, 166, 0.4) 0%, transparent 50%), radial-gradient(circle at 70% 60%, rgba(59, 130, 246, 0.3) 0%, transparent 50%)'
-              : 'radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.3) 0%, transparent 40%), radial-gradient(circle at 70% 70%, rgba(20, 184, 166, 0.4) 0%, transparent 50%)',
+              : 'radial-gradient(circle at 30% 40%, rgba(20, 184, 166, 0.3) 0%, transparent 50%), radial-gradient(circle at 70% 60%, rgba(59, 130, 246, 0.2) 0%, transparent 50%)',
           }}
         />
 
@@ -186,7 +191,7 @@ const HomePage = () => {
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.1 }}
-              className={`text-4xl md:text-5xl font-bold text-center ${isDark ? 'text-white' : 'text-teal-900'}`}
+              className="text-4xl md:text-5xl font-bold text-center text-white"
             >
               What do you want to build, {user?.name?.split(' ')[0] || 'there'}?
             </motion.h1>
@@ -200,7 +205,7 @@ const HomePage = () => {
             className="w-full max-w-2xl mx-auto flex-1 flex items-start pt-8"
           >
             <div className={`w-full rounded-2xl ${
-              isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white/95 border-teal-200'
+              isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-slate-800/90 border-slate-700'
             } backdrop-blur-md border overflow-hidden shadow-xl`}>
               {/* Input Area */}
               <div className="p-4">
@@ -210,33 +215,33 @@ const HomePage = () => {
                   value={promptValue}
                   onChange={(e) => setPromptValue(e.target.value)}
                   placeholder="Describe what you want to build..."
-                  className={`w-full bg-transparent outline-none text-lg ${isDark ? 'text-white placeholder-slate-500' : 'text-teal-900 placeholder-teal-400'}`}
+                  className="w-full bg-transparent outline-none text-lg text-white placeholder-slate-500"
                   onKeyDown={(e) => e.key === 'Enter' && handlePromptSubmit()}
                 />
               </div>
 
               {/* Action Bar */}
               <div className={`flex items-center justify-between px-4 py-3 border-t ${
-                isDark ? 'border-slate-700' : 'border-teal-100'
+                isDark ? 'border-slate-700' : 'border-slate-700'
               }`}>
                 <div className="flex items-center gap-2">
-                  <button className={`p-2 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-50'} transition-colors`}>
-                    <Plus className={`w-5 h-5 ${isDark ? 'text-slate-400' : 'text-teal-500'}`} />
+                  <button className="p-2 rounded-lg hover:bg-slate-700 transition-colors">
+                    <Plus className="w-5 h-5 text-slate-400" />
                   </button>
-                  <button className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-50'} transition-colors`}>
-                    <Paperclip className={`w-4 h-4 ${isDark ? 'text-slate-400' : 'text-teal-500'}`} />
-                    <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-teal-600'}`}>Attach</span>
+                  <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors">
+                    <Paperclip className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm text-slate-400">Attach</span>
                   </button>
-                  <button className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-50'} transition-colors`}>
-                    <Palette className={`w-4 h-4 ${isDark ? 'text-slate-400' : 'text-teal-500'}`} />
-                    <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-teal-600'}`}>Theme</span>
-                    <ChevronDown className={`w-3 h-3 ${isDark ? 'text-slate-400' : 'text-teal-500'}`} />
+                  <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors">
+                    <Palette className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm text-slate-400">Theme</span>
+                    <ChevronDown className="w-3 h-3 text-slate-400" />
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${isDark ? 'hover:bg-slate-700' : 'hover:bg-teal-50'} transition-colors`}>
-                    <MessageCircle className={`w-4 h-4 ${isDark ? 'text-slate-400' : 'text-teal-500'}`} />
-                    <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-teal-600'}`}>Chat</span>
+                  <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-700 transition-colors">
+                    <MessageCircle className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm text-slate-400">Chat</span>
                   </button>
                   <button
                     onClick={handlePromptSubmit}

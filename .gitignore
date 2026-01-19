@@ -1,5 +1,6 @@
 .DS_Store
-projects/
+# Ignore projects folder at root level only (user-created projects)
+/projects/
 archived/
 
 # Dependencies

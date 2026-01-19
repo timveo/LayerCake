@@ -380,7 +380,10 @@ Created: ${today}
   /**
    * Check if all required documents for a gate exist
    */
-  async checkGateDocumentsExist(projectId: string, gate: 'G1' | 'G2' | 'G9'): Promise<{
+  async checkGateDocumentsExist(
+    projectId: string,
+    gate: 'G1' | 'G2' | 'G9',
+  ): Promise<{
     complete: boolean;
     missing: string[];
   }> {

@@ -156,9 +156,7 @@ export class G1PresentationService {
 
     // 2. Record G1 deliverable (Project Intake document)
     const existingDeliverables = await this.deliverablesService.getDeliverables(projectId);
-    const hasIntakeDeliverable = existingDeliverables.some(
-      (d) => d.name === 'PROJECT_INTAKE.md',
-    );
+    const hasIntakeDeliverable = existingDeliverables.some((d) => d.name === 'PROJECT_INTAKE.md');
 
     if (!hasIntakeDeliverable) {
       const deliverable = await this.deliverablesService.createDeliverable({
@@ -266,36 +264,48 @@ ${this.buildAgentWorkflow(data)}
 
 ## Identified Risks
 
-${risks.length > 0
-  ? risks.map((r, i) => `${i + 1}. **${r.description}**
+${
+  risks.length > 0
+    ? risks
+        .map(
+          (r, i) => `${i + 1}. **${r.description}**
    - Probability: ${r.probability.toUpperCase()}
    - Impact: ${r.impact.toUpperCase()}
-   ${r.mitigation ? `- Mitigation: ${r.mitigation}` : ''}`).join('\n\n')
-  : '_No specific risks identified_'}
+   ${r.mitigation ? `- Mitigation: ${r.mitigation}` : ''}`,
+        )
+        .join('\n\n')
+    : '_No specific risks identified_'
+}
 
 ---
 
 ## Key Assumptions
 
-${assumptions.length > 0
-  ? assumptions.map((a, i) => `${i + 1}. ${a}`).join('\n')
-  : '_No assumptions - all requirements explicitly stated_'}
+${
+  assumptions.length > 0
+    ? assumptions.map((a, i) => `${i + 1}. ${a}`).join('\n')
+    : '_No assumptions - all requirements explicitly stated_'
+}
 
 ---
 
 ## Success Criteria
 
-${data.successCriteria && data.successCriteria.length > 0
-  ? data.successCriteria.map(c => `- ${c}`).join('\n')
-  : '_As specified in Project Intake document_'}
+${
+  data.successCriteria && data.successCriteria.length > 0
+    ? data.successCriteria.map((c) => `- ${c}`).join('\n')
+    : '_As specified in Project Intake document_'
+}
 
 ---
 
 ## Constraints
 
-${data.constraints && data.constraints.length > 0
-  ? data.constraints.map(c => `- ${c}`).join('\n')
-  : '_None specified_'}
+${
+  data.constraints && data.constraints.length > 0
+    ? data.constraints.map((c) => `- ${c}`).join('\n')
+    : '_None specified_'
+}
 
 ---
 
@@ -390,7 +400,6 @@ Type **"approve"** in the chat to confirm the project scope and proceed to the p
     return 'Standard (full workflow)';
   }
 
-
   /**
    * Format deployment mode for display
    */
@@ -443,17 +452,17 @@ Type **"approve"** in the chat to confirm the project scope and proceed to the p
     let workflow = '';
 
     workflow += '**Plan Phase** (G1-G4)\n';
-    phases.plan.forEach(agent => {
+    phases.plan.forEach((agent) => {
       workflow += `- ${agent}\n`;
     });
 
     workflow += '\n**Dev Phase** (G5)\n';
-    phases.dev.forEach(agent => {
+    phases.dev.forEach((agent) => {
       workflow += `- ${agent}\n`;
     });
 
     workflow += '\n**Ship Phase** (G6-G9)\n';
-    phases.ship.forEach(agent => {
+    phases.ship.forEach((agent) => {
       workflow += `- ${agent}\n`;
     });
 
@@ -486,9 +495,17 @@ Type **"approve"** in the chat to confirm the project scope and proceed to the p
       else if (lines.includes('bolt')) codeSourceTool = 'Bolt';
       else if (lines.includes('cursor')) codeSourceTool = 'Cursor';
       else if (lines.includes('replit')) codeSourceTool = 'Replit';
-    } else if (lines.includes('my_code') || lines.includes('my code') || lines.includes('i built')) {
+    } else if (
+      lines.includes('my_code') ||
+      lines.includes('my code') ||
+      lines.includes('i built')
+    ) {
       codeSource = 'my_code';
-    } else if (lines.includes('inherited') || lines.includes('legacy') || lines.includes('took over')) {
+    } else if (
+      lines.includes('inherited') ||
+      lines.includes('legacy') ||
+      lines.includes('took over')
+    ) {
       codeSource = 'inherited';
     } else if (
       lines.includes('no existing') ||
@@ -749,7 +766,11 @@ Type **"approve"** in the chat to confirm the project scope and proceed to the p
     }
 
     // Risk: Tight constraints
-    if (parsed.constraints.some((c) => c.toLowerCase().includes('asap') || c.toLowerCase().includes('urgent'))) {
+    if (
+      parsed.constraints.some(
+        (c) => c.toLowerCase().includes('asap') || c.toLowerCase().includes('urgent'),
+      )
+    ) {
       risks.push({
         description: 'Tight timeline constraints may impact quality',
         probability: 'medium',
@@ -791,7 +812,9 @@ Type **"approve"** in the chat to confirm the project scope and proceed to the p
     if (parsed.codeSource === 'none') {
       assumptions.push('Starting from scratch with no existing codebase');
     } else if (parsed.codeSource === 'ai_generated') {
-      assumptions.push(`Existing code from ${parsed.codeSourceTool || 'AI tool'} will serve as foundation`);
+      assumptions.push(
+        `Existing code from ${parsed.codeSourceTool || 'AI tool'} will serve as foundation`,
+      );
     } else if (parsed.codeSource === 'inherited') {
       assumptions.push('Existing codebase is available and accessible for review');
     }
@@ -833,7 +856,7 @@ Type **"approve"** in the chat to confirm the project scope and proceed to the p
   private extractSectionContent(content: string, sectionMarkers: string[]): string {
     const lines = content.split('\n');
     let inSection = false;
-    let sectionContent: string[] = [];
+    const sectionContent: string[] = [];
 
     for (const line of lines) {
       const lowerLine = line.toLowerCase();

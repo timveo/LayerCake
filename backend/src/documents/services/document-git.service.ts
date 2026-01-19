@@ -329,7 +329,10 @@ export class DocumentGitService {
       const branch = branchResult || 'main';
 
       // Get status
-      const statusResult = await this.filesystem.executeCommand(projectId, 'git status --porcelain');
+      const statusResult = await this.filesystem.executeCommand(
+        projectId,
+        'git status --porcelain',
+      );
 
       const staged: string[] = [];
       const unstaged: string[] = [];

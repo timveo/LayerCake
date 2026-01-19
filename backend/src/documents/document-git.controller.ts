@@ -75,7 +75,11 @@ export class DocumentGitController {
     @CurrentUser() user: RequestUser,
   ) {
     await this.verifyProjectAccess(projectId, user.id);
-    return this.documentGit.getDocumentHistory(projectId, decodeURIComponent(filePath), limit || 20);
+    return this.documentGit.getDocumentHistory(
+      projectId,
+      decodeURIComponent(filePath),
+      limit || 20,
+    );
   }
 
   @Get(':projectId/version/:commitHash/:filePath')
@@ -245,10 +249,7 @@ export class DocumentGitController {
   @Post(':projectId/sync')
   @ApiOperation({ summary: 'Sync all database documents to filesystem' })
   @ApiResponse({ status: 200, description: 'Documents synced successfully' })
-  async syncToFilesystem(
-    @Param('projectId') projectId: string,
-    @CurrentUser() user: RequestUser,
-  ) {
+  async syncToFilesystem(@Param('projectId') projectId: string, @CurrentUser() user: RequestUser) {
     await this.verifyProjectAccess(projectId, user.id);
     const synced = await this.documentGit.syncDatabaseToFilesystem(projectId, user.id);
     return { success: true, documentsSynced: synced };

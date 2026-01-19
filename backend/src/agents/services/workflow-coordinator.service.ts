@@ -189,10 +189,17 @@ Begin by warmly acknowledging their project idea, then ask your FIRST question a
 
     // Check current gate status
     const currentGate = await this.gateStateMachine.getCurrentGate(projectId);
-    const isGateInReview = currentGate?.status === 'IN_REVIEW';
 
     // Detect approval keywords
-    const approvalKeywords = ['approved', 'approve', 'looks good', 'lgtm', 'confirm', 'accept', 'yes'];
+    const approvalKeywords = [
+      'approved',
+      'approve',
+      'looks good',
+      'lgtm',
+      'confirm',
+      'accept',
+      'yes',
+    ];
     const isApprovalMessage = approvalKeywords.some((keyword) =>
       message.toLowerCase().includes(keyword),
     );
@@ -347,16 +354,18 @@ The 5 REQUIRED questions (you MUST ask ALL of them):
 
 === YOUR TASK ===
 
-${nextQuestionToAsk <= 5
-  ? `You have ${5 - questionsAnsweredSoFar} more questions to ask.
+${
+  nextQuestionToAsk <= 5
+    ? `You have ${5 - questionsAnsweredSoFar} more questions to ask.
 
 1. Acknowledge the user's answer to question #${currentQuestionBeingAnswered} briefly (1 sentence)
 2. Ask question #${nextQuestionToAsk} in a conversational way
 
 DO NOT output the intake document yet. DO NOT skip questions.`
-  : `All 5 questions have been answered! Now output the complete Project Intake document inside a markdown code fence.
+    : `All 5 questions have been answered! Now output the complete Project Intake document inside a markdown code fence.
 
-IMPORTANT: Output ONLY the document. No additional text after the closing \`\`\`.`}
+IMPORTANT: Output ONLY the document. No additional text after the closing \`\`\`.`
+}
 
 Remember: NEVER output the intake document until you have received answers to ALL 5 questions.`;
 
@@ -390,7 +399,9 @@ Remember: NEVER output the intake document until you have received answers to AL
             await this.handleOnboardingComplete(projectId, userId, response.content);
           } else if (hasIntakeDocument && !enoughQuestionsAnswered) {
             // Agent tried to complete early - log this as an issue
-            console.warn(`Agent output intake document too early! Only ${questionsAnsweredSoFar + 1} questions answered.`);
+            console.warn(
+              `Agent output intake document too early! Only ${questionsAnsweredSoFar + 1} questions answered.`,
+            );
           }
         },
         onError: (error) => {

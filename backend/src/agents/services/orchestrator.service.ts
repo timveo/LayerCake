@@ -68,8 +68,7 @@ export class OrchestratorService {
     // 4. Transition gate to IN_REVIEW
     await this.gateStateMachine.transitionToReview(projectId, 'G1_PENDING', {
       description: 'G1 - Project Scope Approval ready for review',
-      passingCriteria:
-        'User has reviewed project classification, workflow, risks, and assumptions',
+      passingCriteria: 'User has reviewed project classification, workflow, risks, and assumptions',
     });
 
     // 5. Format and return presentation

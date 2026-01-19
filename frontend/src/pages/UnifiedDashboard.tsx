@@ -2298,12 +2298,19 @@ const ProjectsView = ({ theme, onSelectProject }: { theme: ThemeMode; onSelectPr
     });
   }, [apiProjects]);
 
-  // Auto-select first project when loaded
+  // Auto-select first project when loaded (using useMemo to derive initial value)
+  const effectiveSelectedProject = selectedProject || (projects.length > 0 ? projects[0].id : null);
+
+  // Sync the state if we're using a derived value
   useEffect(() => {
-    if (projects.length > 0 && !selectedProject) {
-      setSelectedProject(projects[0].id);
+    if (effectiveSelectedProject && !selectedProject) {
+      // Defer state update to avoid cascading renders
+      const timeoutId = setTimeout(() => {
+        setSelectedProject(effectiveSelectedProject);
+      }, 0);
+      return () => clearTimeout(timeoutId);
     }
-  }, [projects, selectedProject]);
+  }, [effectiveSelectedProject, selectedProject]);
 
   // User lifetime stats
   const userData = {

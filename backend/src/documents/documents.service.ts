@@ -134,7 +134,8 @@ export class DocumentsService {
 
     // If content is being updated, increment version
     const updateData: any = { ...updateDocumentDto };
-    const contentChanged = updateDocumentDto.content && updateDocumentDto.content !== document.content;
+    const contentChanged =
+      updateDocumentDto.content && updateDocumentDto.content !== document.content;
     if (contentChanged) {
       updateData.version = document.version + 1;
     }

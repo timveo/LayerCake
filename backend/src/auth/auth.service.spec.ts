@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../common/prisma/prisma.service';
@@ -62,6 +63,15 @@ describe('AuthService', () => {
             validateRefreshToken: jest.fn(),
             invalidateRefreshToken: jest.fn(),
             invalidateAllUserTokens: jest.fn(),
+          },
+        },
+        {
+          provide: WINSTON_MODULE_PROVIDER,
+          useValue: {
+            info: jest.fn(),
+            warn: jest.fn(),
+            error: jest.fn(),
+            debug: jest.fn(),
           },
         },
       ],

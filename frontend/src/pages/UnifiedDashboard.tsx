@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -18,6 +18,8 @@ import {
   ArrowsPointingInIcon,
 } from '@heroicons/react/24/outline';
 import { projectsApi } from '../api/projects';
+import { metricsApi, type ProjectProgress, type WorkflowStatus, type ProjectCosts, type ProjectMetrics } from '../api/metrics';
+import { gatesApi } from '../api/gates';
 import { useThemeStore } from '../stores/theme';
 import { useAuthStore } from '../stores/auth';
 import FuzzyLlamaLogoSvg from '../assets/Llamalogo.png';
@@ -72,13 +74,6 @@ const ALL_AGENTS = [
   { type: 'AIOPS_ENGINEER', name: 'AIOps', icon: '🔍', status: 'idle' as const, phase: 'ship' as Phase },
   { type: 'ORCHESTRATOR', name: 'Orchestrator', icon: '🎯', status: 'working' as const, phase: 'plan' as Phase },
 ];
-
-// Gates organized by phase
-const GATES_BY_PHASE: Record<Phase, number[]> = {
-  plan: [0, 1, 2, 3],
-  dev: [4, 5, 6],
-  ship: [7, 8, 9],
-};
 
 // Gate names, descriptions, decisions (teaching moments), documents, and celebrations
 const GATE_INFO: Record<number, {
@@ -1438,354 +1433,740 @@ const useAnimatedCounter = (target: number, duration: number = 1000) => {
   return count;
 };
 
-// ============ 1. TEAM WIDGET - Animated agent status ============
-const TeamWidget = ({ phase, theme, expanded }: { phase: Phase; theme: ThemeMode; expanded?: boolean }) => {
-  const phaseAgents = ALL_AGENTS.filter(a => a.phase === phase);
-  const activeAgents = phaseAgents.filter(a => a.status === 'working');
+
+// ============ FLOATING METRICS CARD ============
+type MetricType = 'team' | 'gate' | 'tokens' | 'momentum' | 'loc';
+
+// Shared state for LOC tracking across carousel rotations
+let locTotalAccumulator = { total: 0, added: 0, removed: 0 };
+
+// Custom hook for fetching all metrics data
+const useMetricsData = (projectId: string | null) => {
+  // Fetch project progress
+  const { data: progress, isLoading: progressLoading } = useQuery({
+    queryKey: ['projectProgress', projectId],
+    queryFn: () => projectId ? metricsApi.getProjectProgress(projectId) : null,
+    enabled: !!projectId,
+    refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
+  });
+
+  // Fetch workflow status (active agents)
+  const { data: workflowStatus, isLoading: workflowLoading } = useQuery({
+    queryKey: ['workflowStatus', projectId],
+    queryFn: () => projectId ? metricsApi.getWorkflowStatus(projectId) : null,
+    enabled: !!projectId,
+    refetchInterval: 3000,
+  });
+
+  // Fetch project costs
+  const { data: costs, isLoading: costsLoading } = useQuery({
+    queryKey: ['projectCosts', projectId],
+    queryFn: () => projectId ? metricsApi.getProjectCosts(projectId) : null,
+    enabled: !!projectId,
+    refetchInterval: 10000,
+  });
+
+  // Fetch gate stats (available for future use)
+  const { isLoading: gateStatsLoading } = useQuery({
+    queryKey: ['gateStats', projectId],
+    queryFn: () => projectId ? gatesApi.getStats(projectId) : null,
+    enabled: !!projectId,
+    refetchInterval: 10000,
+  });
+
+  // Fetch project metrics (stories, bugs, etc.)
+  const { data: projectMetrics, isLoading: metricsLoading } = useQuery({
+    queryKey: ['projectMetrics', projectId],
+    queryFn: () => projectId ? metricsApi.getProjectMetrics(projectId) : null,
+    enabled: !!projectId,
+    refetchInterval: 10000,
+  });
+
+  // Fetch code directory tree for LOC stats (available for future use)
+  const { isLoading: codeTreeLoading } = useQuery({
+    queryKey: ['codeTree', projectId],
+    queryFn: () => projectId ? metricsApi.getDirectoryTree(projectId) : null,
+    enabled: !!projectId,
+    refetchInterval: 15000,
+  });
+
+  return {
+    progress,
+    workflowStatus,
+    costs,
+    projectMetrics,
+    isLoading: progressLoading || workflowLoading || costsLoading || gateStatsLoading || metricsLoading || codeTreeLoading,
+  };
+};
+
+const FloatingMetricsCard = ({
+  theme,
+  projectId,
+  onGateClick,
+}: {
+  theme: ThemeMode;
+  projectId: string | null;
+  onGateClick: (gate: number) => void;
+}) => {
   const isDark = theme === 'dark';
+  const [currentMetric, setCurrentMetric] = useState<MetricType>('gate');
+  const [isHovered, setIsHovered] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef({ x: 0, y: 0, posX: 0, posY: 0 });
+
+  // Fetch real metrics data
+  const metricsData = useMetricsData(projectId);
+
+  // Derive current gate and phase from API data
+  const currentGate = metricsData.progress?.currentGate ?? 3;
+  const selectedPhase = metricsData.progress?.currentPhase ?? 'plan';
+
+  const metrics: MetricType[] = ['team', 'gate', 'tokens', 'momentum', 'loc'];
+  const metricLabels: Record<MetricType, string> = {
+    team: 'Team',
+    gate: 'Gate Progress',
+    tokens: 'Token Usage',
+    momentum: 'Momentum',
+    loc: 'Lines of Code',
+  };
+
+  // Track when LOC card rotates away to accumulate deltas
+  const prevMetricRef = useRef<MetricType>(currentMetric);
+  useEffect(() => {
+    if (prevMetricRef.current === 'loc' && currentMetric !== 'loc') {
+      // LOC card just rotated away - accumulate will happen in the component
+    }
+    prevMetricRef.current = currentMetric;
+  }, [currentMetric]);
+
+  // Auto-cycle through metrics every 6 seconds (when not hovered)
+  useEffect(() => {
+    if (isHovered || isMinimized) return;
+
+    const interval = setInterval(() => {
+      setCurrentMetric(prev => {
+        const currentIndex = metrics.indexOf(prev);
+        return metrics[(currentIndex + 1) % metrics.length];
+      });
+    }, 6000);
+
+    return () => clearInterval(interval);
+  }, [isHovered, isMinimized]);
+
+  const nextMetric = () => {
+    const currentIndex = metrics.indexOf(currentMetric);
+    setCurrentMetric(metrics[(currentIndex + 1) % metrics.length]);
+  };
+
+  const prevMetric = () => {
+    const currentIndex = metrics.indexOf(currentMetric);
+    setCurrentMetric(metrics[(currentIndex - 1 + metrics.length) % metrics.length]);
+  };
+
+  // Drag handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return; // Don't drag when clicking buttons
+    setIsDragging(true);
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      posX: position.x,
+      posY: position.y,
+    };
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      const deltaX = e.clientX - dragStartRef.current.x;
+      const deltaY = e.clientY - dragStartRef.current.y;
+      setPosition({
+        x: dragStartRef.current.posX + deltaX,
+        y: dragStartRef.current.posY + deltaY,
+      });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
+
+  const renderMetricContent = () => {
+    switch (currentMetric) {
+      case 'team':
+        return <FloatingTeamContent phase={selectedPhase} theme={theme} currentGate={currentGate} workflowStatus={metricsData.workflowStatus} />;
+      case 'gate':
+        return <FloatingGateContent currentGate={currentGate} selectedPhase={selectedPhase} theme={theme} onGateClick={onGateClick} progress={metricsData.progress} />;
+      case 'tokens':
+        return <FloatingTokenContent selectedPhase={selectedPhase} theme={theme} currentGate={currentGate} costs={metricsData.costs} />;
+      case 'momentum':
+        return <FloatingMomentumContent theme={theme} projectMetrics={metricsData.projectMetrics} progress={metricsData.progress} />;
+      case 'loc':
+        return <FloatingLOCContent theme={theme} isActive={currentMetric === 'loc'} />;
+    }
+  };
+
+  if (isMinimized) {
+    return (
+      <motion.div
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        style={{
+          position: 'fixed',
+          bottom: 16 - position.y,
+          right: 16 - position.x,
+        }}
+        className="z-50"
+      >
+        <button
+          onClick={() => setIsMinimized(false)}
+          className={`w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-110 ${
+            isDark
+              ? 'bg-slate-800 border border-teal-500/50 text-teal-400 hover:bg-slate-700'
+              : 'bg-white border border-teal-300 text-teal-600 hover:bg-teal-50'
+          }`}
+        >
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+        </button>
+      </motion.div>
+    );
+  }
 
   return (
-    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
-      <div className="flex items-center justify-between mb-1.5">
-        <h3 className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Team</h3>
-        <span className={`text-[9px] font-bold ${isDark ? 'text-teal-300' : 'text-teal-600'}`}>{activeAgents.length}/{phaseAgents.length}</span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-1">
-        {phaseAgents.map((agent) => (
-          <div
-            key={agent.type}
-            className={`relative flex items-center gap-1.5 p-1 rounded transition-all ${
-              agent.status === 'working'
-                ? isDark ? 'bg-gradient-to-r from-teal-500/30 to-transparent' : 'bg-gradient-to-r from-teal-100 to-transparent'
-                : isDark ? 'bg-slate-700/20' : 'bg-slate-100'
-            }`}
-          >
-            <span className="text-sm">{agent.icon}</span>
-            <span className={`text-[8px] truncate flex-1 ${agent.status === 'working' ? isDark ? 'text-white font-medium' : 'text-teal-700 font-medium' : isDark ? 'text-teal-400' : 'text-slate-600'}`}>
-              {agent.name}
+    <motion.div
+      ref={dragRef}
+      initial={{ y: 100, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: 100, opacity: 0 }}
+      transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+      style={{
+        position: 'fixed',
+        bottom: 16 - position.y,
+        right: 16 - position.x,
+        cursor: isDragging ? 'grabbing' : 'grab',
+      }}
+      className="z-50"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => { setIsHovered(false); setIsDragging(false); }}
+      onMouseDown={handleMouseDown}
+    >
+      <div className={`w-96 rounded-2xl shadow-2xl border backdrop-blur-md overflow-hidden ${
+        isDark
+          ? 'bg-slate-800/95 border-slate-700/50'
+          : 'bg-white/95 border-slate-200'
+      }`}>
+        {/* Header with navigation */}
+        <div className={`flex items-center justify-between px-4 py-2.5 border-b ${
+          isDark ? 'border-slate-700/50 bg-slate-900/50' : 'border-slate-100 bg-slate-50/50'
+        }`}>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={prevMetric}
+              className={`p-1.5 rounded hover:bg-slate-700/30 transition-colors ${isDark ? 'text-slate-400 hover:text-teal-400' : 'text-slate-500 hover:text-teal-600'}`}
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
+              {metricLabels[currentMetric]}
             </span>
-            {agent.status === 'working' && (
-              <motion.div className="w-1.5 h-1.5 rounded-full bg-emerald-500" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1, repeat: Infinity }} />
-            )}
+            <button
+              onClick={nextMetric}
+              className={`p-1.5 rounded hover:bg-slate-700/30 transition-colors ${isDark ? 'text-slate-400 hover:text-teal-400' : 'text-slate-500 hover:text-teal-600'}`}
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
           </div>
-        ))}
+
+          {/* Dot indicators */}
+          <div className="flex items-center gap-1.5">
+            {metrics.map((m) => (
+              <button
+                key={m}
+                onClick={() => setCurrentMetric(m)}
+                className={`w-2 h-2 rounded-full transition-all ${
+                  m === currentMetric
+                    ? 'bg-teal-500 w-4'
+                    : isDark ? 'bg-slate-600 hover:bg-slate-500' : 'bg-slate-300 hover:bg-slate-400'
+                }`}
+              />
+            ))}
+          </div>
+
+          <button
+            onClick={() => setIsMinimized(true)}
+            className={`p-1.5 rounded hover:bg-slate-700/30 transition-colors ${isDark ? 'text-slate-400 hover:text-slate-300' : 'text-slate-500 hover:text-slate-600'}`}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Content area with animation - fixed height */}
+        <div className="p-4 h-48 overflow-hidden">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentMetric}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2 }}
+              className="h-full"
+            >
+              {renderMetricContent()}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+
+        {/* Auto-cycle indicator */}
+        {!isHovered && (
+          <div className={`h-1 ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+            <motion.div
+              className="h-full bg-teal-500"
+              initial={{ width: '0%' }}
+              animate={{ width: '100%' }}
+              transition={{ duration: 6, ease: 'linear', repeat: Infinity }}
+            />
+          </div>
+        )}
       </div>
-    </Panel>
+    </motion.div>
   );
 };
 
-// ============ 2. GATE PROGRESS RING - Circular progress ============
-const GateProgressRing = ({ currentGate, selectedPhase, theme, onGateClick, expanded }: {
+// Floating content components
+const FloatingTeamContent = ({ phase, theme, currentGate, workflowStatus }: {
+  phase: Phase;
+  theme: ThemeMode;
+  currentGate: number;
+  workflowStatus?: WorkflowStatus | null;
+}) => {
+  const isDark = theme === 'dark';
+
+  // Use real workflow data if available, otherwise fall back to static data
+  const agents = workflowStatus?.activeAgents?.length
+    ? workflowStatus.activeAgents.map(a => ({
+        type: a.agentType,
+        name: a.name,
+        status: a.status,
+        phase: a.phase,
+      }))
+    : ALL_AGENTS.filter(a => a.phase === phase);
+
+  const activeAgents = agents.filter(a => a.status === 'working');
+
+  const phaseLabels: Record<Phase, string> = {
+    plan: 'Planning Phase',
+    dev: 'Development Phase',
+    ship: 'Deployment Phase',
+  };
+
+  const phaseColors: Record<Phase, string> = {
+    plan: '#f59e0b',
+    dev: '#06b6d4',
+    ship: '#f97316',
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className={`text-sm font-medium ${isDark ? 'text-white' : 'text-slate-700'}`}>{phaseLabels[phase]}</span>
+          <div
+            className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold text-white"
+            style={{ backgroundColor: phaseColors[phase] }}
+          >
+            G{currentGate}
+          </div>
+        </div>
+        <div className={`px-2 py-0.5 rounded-full ${isDark ? 'bg-teal-500/20' : 'bg-teal-100'}`}>
+          <span className={`text-sm font-bold ${isDark ? 'text-teal-300' : 'text-teal-600'}`}>{activeAgents.length}</span>
+          <span className={`text-xs ${isDark ? 'text-teal-400' : 'text-teal-500'}`}>/{agents.length} active</span>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+        {agents.map((agent) => (
+          <div
+            key={agent.type}
+            className={`flex items-center gap-2 py-1.5 px-2 rounded-lg transition-all ${
+              agent.status === 'working'
+                ? isDark ? 'bg-teal-500/15 border border-teal-500/30' : 'bg-teal-50 border border-teal-200'
+                : isDark ? 'bg-slate-700/30' : 'bg-slate-100'
+            }`}
+          >
+            <div className="relative flex-shrink-0">
+              {agent.status === 'working' ? (
+                <motion.div
+                  className="w-2.5 h-2.5 rounded-full bg-emerald-500"
+                  animate={{ scale: [1, 1.2, 1], opacity: [1, 0.7, 1] }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                />
+              ) : (
+                <div className={`w-2.5 h-2.5 rounded-full ${isDark ? 'bg-slate-600' : 'bg-slate-300'}`} />
+              )}
+            </div>
+            <span className={`text-xs flex-1 ${
+              agent.status === 'working'
+                ? isDark ? 'text-white font-medium' : 'text-teal-700 font-medium'
+                : isDark ? 'text-slate-400' : 'text-slate-600'
+            }`}>
+              {agent.name}
+            </span>
+            <span className={`text-[10px] ${
+              agent.status === 'working'
+                ? isDark ? 'text-emerald-400' : 'text-emerald-600'
+                : isDark ? 'text-slate-500' : 'text-slate-400'
+            }`}>
+              {agent.status === 'working' ? 'Active' : 'Idle'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const FloatingGateContent = ({ currentGate, selectedPhase, theme, onGateClick, progress: progressData }: {
   currentGate: number;
   selectedPhase: Phase;
   theme: ThemeMode;
   onGateClick: (gate: number) => void;
-  expanded?: boolean;
+  progress?: ProjectProgress | null;
 }) => {
   const isDark = theme === 'dark';
   const totalGates = 10;
-  const progress = (currentGate / totalGates) * 100;
-  const circumference = 2 * Math.PI * 40; // radius = 40
-  const strokeDashoffset = circumference - (progress / 100) * circumference;
+  // Use API data if available, otherwise calculate from currentGate
+  const percentComplete = progressData?.percentComplete ?? (currentGate / totalGates) * 100;
 
-  const phaseGates = GATES_BY_PHASE[selectedPhase];
-  const phaseProgress = phaseGates.filter(g => g < currentGate).length;
-  const phaseTotal = phaseGates.length;
-
-  // Phase colors
   const phaseColors: Record<Phase, string> = {
-    plan: '#f59e0b', // amber
-    dev: '#06b6d4',  // cyan
-    ship: '#f97316', // orange
+    plan: '#f59e0b',
+    dev: '#06b6d4',
+    ship: '#f97316',
+  };
+
+  const phaseLabels: Record<Phase, string> = {
+    plan: 'Plan',
+    dev: 'Develop',
+    ship: 'Deploy',
   };
 
   return (
-    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
-      <div className="flex items-center gap-3 h-full">
-        {/* Circular Progress */}
-        <div className="relative w-16 h-16 flex-shrink-0">
-          <svg className="w-16 h-16 transform -rotate-90">
-            <circle cx="32" cy="32" r="26" stroke={isDark ? '#334155' : '#e2e8f0'} strokeWidth="4" fill="none" />
-            <motion.circle
-              cx="32" cy="32" r="26"
-              stroke="url(#progressGradient)"
-              strokeWidth="4"
-              fill="none"
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              initial={{ strokeDashoffset: circumference }}
-              animate={{ strokeDashoffset }}
-              transition={{ duration: 1.5, ease: 'easeOut' }}
-            />
-            <defs>
-              <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor={isDark ? '#8b5cf6' : '#14b8a6'} />
-                <stop offset="50%" stopColor="#06b6d4" />
-                <stop offset="100%" stopColor="#10b981" />
-              </linearGradient>
-            </defs>
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-700'}`}>{Math.round(progress)}%</span>
-          </div>
+    <div className="h-full flex items-center gap-4">
+      {/* Circular progress */}
+      <div className="relative w-24 h-24 flex-shrink-0">
+        <svg className="w-24 h-24 transform -rotate-90">
+          <circle cx="48" cy="48" r="42" stroke={isDark ? '#334155' : '#e2e8f0'} strokeWidth="5" fill="none" />
+          <motion.circle
+            cx="48" cy="48" r="42"
+            stroke={phaseColors[selectedPhase]}
+            strokeWidth="5"
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={2 * Math.PI * 42}
+            initial={{ strokeDashoffset: 2 * Math.PI * 42 }}
+            animate={{ strokeDashoffset: 2 * Math.PI * 42 - (percentComplete / 100) * 2 * Math.PI * 42 }}
+            transition={{ duration: 1.5, ease: 'easeOut' }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-700'}`}>{Math.round(percentComplete)}%</span>
+        </div>
+      </div>
+
+      {/* Gate info */}
+      <div className="flex-1 flex flex-col justify-center">
+        <div
+          className="inline-block self-start px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-white mb-2"
+          style={{ backgroundColor: phaseColors[selectedPhase] }}
+        >
+          {phaseLabels[selectedPhase]} Phase
         </div>
 
-        {/* Gate Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-1">
-            <div
-              className="w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
-              style={{ backgroundColor: phaseColors[selectedPhase] }}
-            >
-              G{currentGate}
-            </div>
-            <p className={`text-[9px] font-semibold truncate ${isDark ? 'text-white' : 'text-slate-700'}`}>{GATE_INFO[currentGate]?.name}</p>
-          </div>
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <span className={`text-[8px] capitalize ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>{selectedPhase}</span>
-            <div className={`flex-1 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700/50' : 'bg-slate-200'}`}>
-              <motion.div
-                className="h-full rounded-full"
-                style={{ backgroundColor: phaseColors[selectedPhase] }}
-                initial={{ width: 0 }}
-                animate={{ width: `${(phaseProgress / phaseTotal) * 100}%` }}
-              />
-            </div>
-            <span className={`text-[8px] ${isDark ? 'text-teal-300' : 'text-slate-600'}`}>{phaseProgress}/{phaseTotal}</span>
-          </div>
-          <button
-            onClick={() => onGateClick(currentGate)}
-            className={`w-full py-1 rounded text-[9px] font-medium transition-colors ${isDark ? 'bg-teal-950/20 hover:bg-teal-950/30 text-teal-300' : 'bg-teal-100 hover:bg-teal-200 text-teal-700'}`}
+        <div className="flex items-center gap-2 mb-3">
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold text-white shadow-lg"
+            style={{ backgroundColor: phaseColors[selectedPhase] }}
           >
-            Review →
-          </button>
+            G{currentGate}
+          </div>
+          <div>
+            <p className={`text-sm font-semibold leading-tight ${isDark ? 'text-white' : 'text-slate-700'}`}>{GATE_INFO[currentGate]?.name}</p>
+            <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Gate {currentGate} of {totalGates}</p>
+          </div>
         </div>
+
+        <button
+          onClick={() => onGateClick(currentGate)}
+          className={`w-full py-1.5 rounded-lg text-xs font-medium transition-colors ${
+            isDark
+              ? 'bg-teal-600 hover:bg-teal-500 text-white'
+              : 'bg-teal-600 hover:bg-teal-700 text-white'
+          }`}
+        >
+          Review Gate
+        </button>
       </div>
-    </Panel>
+    </div>
   );
 };
 
-// ============ 3. ANIMATED TOKEN COUNTER - Flowing tokens ============
-const TokenCounterWidget = ({ selectedPhase, theme, expanded }: { selectedPhase: Phase; theme: ThemeMode; expanded?: boolean }) => {
+const FloatingTokenContent = ({ selectedPhase, theme, currentGate, costs }: {
+  selectedPhase: Phase;
+  theme: ThemeMode;
+  currentGate: number;
+  costs?: ProjectCosts | null;
+}) => {
   const isDark = theme === 'dark';
 
-  // Simulated live token data (in real app, this would come from API)
-  const [tokenData, setTokenData] = useState({
-    gate: 4520,
-    phase: 12450,
-    project: 23000,
-    rate: 45, // tokens per second
-  });
+  // Use real costs data if available
+  const totalTokens = costs ? costs.totalInputTokens + costs.totalOutputTokens : 23000;
 
-  // Simulate token flow
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTokenData(prev => ({
-        ...prev,
-        gate: prev.gate + Math.floor(Math.random() * 10),
-        phase: prev.phase + Math.floor(Math.random() * 15),
-        project: prev.project + Math.floor(Math.random() * 20),
-        rate: 40 + Math.floor(Math.random() * 20),
-      }));
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
+  // For gate/phase breakdown, we'd need per-gate costs API
+  // For now, estimate based on total
+  const gateTokens = Math.round(totalTokens * 0.2); // ~20% for current gate
+  const phaseTokens = Math.round(totalTokens * 0.5); // ~50% for current phase
 
-  const animatedGate = useAnimatedCounter(tokenData.gate, 800);
-  const animatedPhase = useAnimatedCounter(tokenData.phase, 800);
-  const animatedProject = useAnimatedCounter(tokenData.project, 800);
+  const animatedProject = useAnimatedCounter(totalTokens, 800);
+  const animatedGate = useAnimatedCounter(gateTokens, 800);
+  const animatedPhase = useAnimatedCounter(phaseTokens, 800);
 
-  const formatTokens = (n: number) => {
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-    return n.toString();
+  const formatTokens = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toString();
+
+  const phaseLabels: Record<Phase, string> = {
+    plan: 'Plan',
+    dev: 'Develop',
+    ship: 'Deploy',
   };
 
-  const toCost = (tokens: number) => `$${(tokens * 0.0001).toFixed(2)}`;
+  // Calculate costs from tokens (rough estimate: $0.01 per 1000 tokens)
+  const tokenToCost = (tokens: number) => (tokens * 0.00001).toFixed(2);
 
   return (
-    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
-      <div className="flex items-center justify-between mb-1.5">
-        <h3 className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Tokens</h3>
-        <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${isDark ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
-          <motion.div className="w-1.5 h-1.5 rounded-full bg-emerald-500" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1, repeat: Infinity }} />
-          <span className={`text-[8px] font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{tokenData.rate}/s</span>
+    <div className="h-full flex flex-col justify-between">
+      {/* Total - prominently displayed */}
+      <div className={`p-2.5 rounded-lg ${isDark ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20' : 'bg-gradient-to-r from-emerald-100 to-teal-100'}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <span className={`text-[10px] block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>Total Project</span>
+            <span className={`text-xl font-bold font-mono ${isDark ? 'text-white' : 'text-slate-800'}`}>{formatTokens(animatedProject)}</span>
+            <span className={`text-[10px] ml-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>tokens</span>
+          </div>
+          <div className="text-right">
+            <span className={`text-xl font-bold ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>${costs?.totalCost?.toFixed(2) ?? tokenToCost(animatedProject)}</span>
+            <div className={`flex items-center justify-end gap-1 mt-0.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              <motion.div className="w-1.5 h-1.5 rounded-full bg-emerald-500" animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+              <span className="text-[10px] font-mono">{costs?.totalAgentExecutions ?? 0} runs</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-1.5">
-        <div className={`p-1.5 rounded ${isDark ? 'bg-slate-700/30' : 'bg-slate-100'}`}>
-          <span className={`text-[7px] block ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>Gate</span>
-          <span className={`text-sm font-bold font-mono ${isDark ? 'text-white' : 'text-slate-700'}`}>{formatTokens(animatedGate)}</span>
-          <span className={`text-[7px] block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{toCost(animatedGate)}</span>
+      {/* Gate and Phase breakdown */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`p-2.5 rounded-lg ${isDark ? 'bg-slate-700/40' : 'bg-slate-100'}`}>
+          <span className={`text-[10px] block ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>Gate {currentGate}</span>
+          <div className="flex items-baseline justify-between mt-0.5">
+            <span className={`text-base font-bold font-mono ${isDark ? 'text-white' : 'text-slate-700'}`}>{formatTokens(animatedGate)}</span>
+            <span className={`text-sm font-semibold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>${tokenToCost(animatedGate)}</span>
+          </div>
         </div>
-        <div className={`p-1.5 rounded ${isDark ? 'bg-slate-700/30' : 'bg-slate-100'}`}>
-          <span className={`text-[7px] block capitalize ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>{selectedPhase}</span>
-          <span className={`text-sm font-bold font-mono ${isDark ? 'text-white' : 'text-slate-700'}`}>{formatTokens(animatedPhase)}</span>
-          <span className={`text-[7px] block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{toCost(animatedPhase)}</span>
-        </div>
-        <div className={`p-1.5 rounded ${isDark ? 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20' : 'bg-gradient-to-r from-emerald-100 to-teal-100'}`}>
-          <span className={`text-[7px] block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>Total</span>
-          <span className={`text-sm font-bold font-mono ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>{formatTokens(animatedProject)}</span>
-          <span className={`text-[7px] block ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>{toCost(animatedProject)}</span>
+        <div className={`p-2.5 rounded-lg ${isDark ? 'bg-slate-700/40' : 'bg-slate-100'}`}>
+          <span className={`text-[10px] block ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>{phaseLabels[selectedPhase]} Phase</span>
+          <div className="flex items-baseline justify-between mt-0.5">
+            <span className={`text-base font-bold font-mono ${isDark ? 'text-white' : 'text-slate-700'}`}>{formatTokens(animatedPhase)}</span>
+            <span className={`text-sm font-semibold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>${tokenToCost(animatedPhase)}</span>
+          </div>
         </div>
       </div>
-    </Panel>
+    </div>
   );
 };
 
-// ============ 4. PROGRESS MOMENTUM - Velocity metrics ============
-const MomentumWidget = ({ theme, expanded }: { theme: ThemeMode; expanded?: boolean }) => {
+const FloatingMomentumContent = ({ theme, projectMetrics, progress }: {
+  theme: ThemeMode;
+  projectMetrics?: ProjectMetrics | null;
+  progress?: ProjectProgress | null;
+}) => {
   const isDark = theme === 'dark';
 
-  // Simulated momentum data
-  const [momentum] = useState({
-    velocity: 12, // tasks per hour
-    streak: 5,    // consecutive gates without rejection
-    todayTasks: 8,
-    yesterdayTasks: 6,
-  });
+  // Use real data if available
+  const completedTasks = progress?.completedTasks ?? 8;
+  const storiesCompleted = projectMetrics?.storiesCompleted ?? 5;
 
-  const velocityChange = ((momentum.todayTasks - momentum.yesterdayTasks) / momentum.yesterdayTasks) * 100;
+  // Calculate velocity change
+  const todayTasks = completedTasks;
+  const yesterdayTasks = Math.max(1, completedTasks - 2); // Estimate
+
+  const velocityChange = yesterdayTasks > 0 ? ((todayTasks - yesterdayTasks) / yesterdayTasks) * 100 : 0;
   const isPositive = velocityChange >= 0;
 
   return (
-    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
-      <div className="flex items-center justify-between mb-1.5">
-        <h3 className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Momentum</h3>
-        <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full ${isDark ? 'bg-orange-500/20' : 'bg-orange-100'}`}>
-          <span className="text-sm">🔥</span>
-          <span className={`text-[8px] font-bold ${isDark ? 'text-orange-400' : 'text-orange-600'}`}>{momentum.streak}</span>
+    <div className="h-full flex flex-col justify-between">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${isDark ? 'bg-amber-500/20' : 'bg-amber-100'}`}>
+            <span className="text-xl">⚡</span>
+          </div>
+          <div>
+            <span className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-700'}`}>{completedTasks}</span>
+            <span className={`text-xs ml-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>completed</span>
+          </div>
+        </div>
+        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full ${isDark ? 'bg-orange-500/20' : 'bg-orange-100'}`}>
+          <span className="text-lg">🔥</span>
+          <span className={`text-base font-bold ${isDark ? 'text-orange-400' : 'text-orange-600'}`}>{storiesCompleted}</span>
+          <span className={`text-[10px] ${isDark ? 'text-orange-400/70' : 'text-orange-500'}`}>stories</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <div className={`flex-1 p-1.5 rounded ${isDark ? 'bg-slate-700/30' : 'bg-slate-100'}`}>
-          <div className="flex items-center gap-1">
-            <span className="text-sm">⚡</span>
-            <span className={`text-base font-bold ${isDark ? 'text-white' : 'text-slate-700'}`}>{momentum.velocity}</span>
-            <span className={`text-[7px] ${isDark ? 'text-teal-500' : 'text-slate-500'}`}>/hr</span>
-          </div>
-        </div>
-        <div className={`flex-1 p-1.5 rounded ${isDark ? 'bg-slate-700/30' : 'bg-slate-100'}`}>
-          <div className="flex items-center gap-1">
-            <span className="text-sm">{isPositive ? '📈' : '📉'}</span>
-            <span className={`text-base font-bold ${isPositive ? 'text-emerald-500' : 'text-red-500'}`}>
+      <div className={`p-2.5 rounded-lg ${isDark ? 'bg-slate-700/30' : 'bg-slate-100'}`}>
+        <div className="flex items-center justify-between mb-2">
+          <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Progress</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-base">{isPositive ? '📈' : '📉'}</span>
+            <span className={`text-lg font-bold ${isPositive ? 'text-emerald-500' : 'text-red-500'}`}>
               {isPositive ? '+' : ''}{Math.round(velocityChange)}%
             </span>
           </div>
         </div>
-      </div>
-
-      <div className="flex items-center gap-1.5">
-        <span className={`text-[7px] ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>Today</span>
-        <div className="flex-1 flex gap-0.5">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className={`flex-1 h-1.5 rounded-sm ${i < momentum.todayTasks ? 'bg-gradient-to-t from-teal-500 to-emerald-400' : isDark ? 'bg-slate-700/50' : 'bg-slate-200'}`} />
-          ))}
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Tasks</span>
+          <div className="flex-1 flex gap-0.5">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className={`flex-1 h-1.5 rounded-sm ${i < todayTasks ? 'bg-gradient-to-t from-teal-500 to-emerald-400' : isDark ? 'bg-slate-700/50' : 'bg-slate-200'}`} />
+            ))}
+          </div>
+          <span className={`text-xs font-semibold ${isDark ? 'text-white' : 'text-slate-700'}`}>{todayTasks}</span>
         </div>
-        <span className={`text-[8px] font-semibold ${isDark ? 'text-white' : 'text-slate-700'}`}>{momentum.todayTasks}</span>
       </div>
-    </Panel>
+    </div>
   );
 };
 
-// ============ 5. LINES OF CODE - Code output metrics ============
-const LinesOfCodeWidget = ({ theme, expanded }: { theme: ThemeMode; expanded?: boolean }) => {
+const FloatingLOCContent = ({ theme, isActive }: { theme: ThemeMode; isActive: boolean }) => {
   const isDark = theme === 'dark';
-
-  // Simulated LOC data
-  const [locData] = useState({
-    total: 12847,
-    today: 342,
-    added: 287,
-    removed: 45,
-    modified: 156,
-    byLanguage: [
-      { lang: 'TypeScript', lines: 6420, color: 'bg-blue-500', percent: 50 },
-      { lang: 'Python', lines: 4210, color: 'bg-yellow-500', percent: 33 },
-      { lang: 'CSS', lines: 1580, color: 'bg-pink-500', percent: 12 },
-      { lang: 'Other', lines: 637, color: 'bg-slate-500', percent: 5 },
-    ],
+  const [deltaData, setDeltaData] = useState({
+    added: 0,
+    removed: 0,
+  });
+  const [totals, setTotals] = useState({
+    total: locTotalAccumulator.total,
+    sessionAdded: locTotalAccumulator.added,
+    sessionRemoved: locTotalAccumulator.removed,
   });
 
-  const animatedTotal = useAnimatedCounter(locData.total, 1500);
-  const animatedToday = useAnimatedCounter(locData.today, 1000);
-
-  return (
-    <Panel theme={theme} className={`p-2 ${expanded ? 'flex-1' : ''}`}>
-      <div className="flex items-center justify-between mb-1">
-        <h3 className={`text-[9px] font-semibold uppercase tracking-wider ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>Lines of Code</h3>
-        <div className="flex items-baseline gap-1">
-          <span className={`text-base font-bold ${isDark ? 'text-white' : 'text-slate-700'}`}>{animatedTotal.toLocaleString()}</span>
-          <span className={`text-[7px] ${isDark ? 'text-teal-500' : 'text-slate-500'}`}>total</span>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <div className={`flex-1 p-1 rounded text-center ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-100'}`}>
-          <span className={`text-xs font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>+{animatedToday}</span>
-          <span className={`text-[7px] ml-0.5 ${isDark ? 'text-emerald-500/70' : 'text-emerald-500'}`}>today</span>
-        </div>
-        <div className={`flex-1 p-1 rounded text-center ${isDark ? 'bg-blue-500/10' : 'bg-blue-100'}`}>
-          <span className={`text-xs font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>+{locData.added}</span>
-          <span className={`text-[7px] ml-0.5 ${isDark ? 'text-blue-500/70' : 'text-blue-500'}`}>add</span>
-        </div>
-        <div className={`flex-1 p-1 rounded text-center ${isDark ? 'bg-red-500/10' : 'bg-red-100'}`}>
-          <span className={`text-xs font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>-{locData.removed}</span>
-          <span className={`text-[7px] ml-0.5 ${isDark ? 'text-red-500/70' : 'text-red-500'}`}>del</span>
-        </div>
-      </div>
-
-      <div className="flex h-1.5 rounded-full overflow-hidden gap-0.5">
-        {locData.byLanguage.map((lang) => (
-          <div key={lang.lang} className={`${lang.color} rounded-sm`} style={{ width: `${lang.percent}%` }} title={`${lang.lang}: ${lang.percent}%`} />
-        ))}
-      </div>
-    </Panel>
-  );
-};
-
-// Phase selector - updates the displayed phase in right panel (no popup)
-const PhaseSelector = ({ currentPhase, selectedPhase, onPhaseSelect, theme }: {
-  currentPhase: Phase;
-  selectedPhase: Phase;
-  onPhaseSelect: (phase: Phase) => void;
-  theme: ThemeMode
-}) => {
-  const isDark = theme === 'dark';
-  const phases: { id: Phase; label: string }[] = [
-    { id: 'plan', label: 'Plan' },
-    { id: 'dev', label: 'Build' },
-    { id: 'ship', label: 'Ship' },
+  const byLanguage = [
+    { lang: 'TypeScript', color: 'bg-blue-500', percent: 50 },
+    { lang: 'Python', color: 'bg-yellow-500', percent: 33 },
+    { lang: 'CSS', color: 'bg-pink-500', percent: 12 },
+    { lang: 'Other', color: 'bg-slate-500', percent: 5 },
   ];
 
+  // Simulate code changes while this card is active
+  useEffect(() => {
+    if (!isActive) {
+      // When becoming inactive, accumulate the delta to totals
+      locTotalAccumulator.total += deltaData.added - deltaData.removed;
+      locTotalAccumulator.added += deltaData.added;
+      locTotalAccumulator.removed += deltaData.removed;
+      return;
+    }
+
+    // Reset delta when becoming active
+    setDeltaData({ added: 0, removed: 0 });
+    setTotals({
+      total: locTotalAccumulator.total,
+      sessionAdded: locTotalAccumulator.added,
+      sessionRemoved: locTotalAccumulator.removed,
+    });
+
+    const interval = setInterval(() => {
+      const newAdded = Math.floor(Math.random() * 15) + 5;
+      const newRemoved = Math.floor(Math.random() * 5);
+      setDeltaData(prev => ({
+        added: prev.added + newAdded,
+        removed: prev.removed + newRemoved,
+      }));
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [isActive]);
+
+  const currentTotal = totals.total + deltaData.added - deltaData.removed;
+  const animatedTotal = useAnimatedCounter(currentTotal, 800);
+
   return (
-    <Panel theme={theme} className="p-1.5">
-      <div className="flex gap-1">
-        {phases.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => onPhaseSelect(p.id)}
-            className={`flex-1 text-center py-1 px-2 rounded transition-all cursor-pointer ${
-              selectedPhase === p.id
-                ? 'bg-teal-600 shadow-md text-white'
-                : currentPhase === p.id
-                  ? isDark ? 'bg-teal-950/30 ring-1 ring-teal-500/50' : 'bg-teal-100 ring-1 ring-teal-300'
-                  : `${isDark ? 'bg-slate-700/30 hover:bg-slate-700/50' : 'bg-slate-100 hover:bg-slate-200'}`
-            }`}
-          >
-            <div className={`text-[10px] font-medium ${selectedPhase === p.id ? 'text-white' : isDark ? 'text-teal-300' : 'text-slate-600'}`}>{p.label}</div>
-          </button>
-        ))}
+    <div className="h-full flex flex-col justify-between">
+      {/* Total lines */}
+      <div className="flex items-center justify-between">
+        <div>
+          <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Total Lines</span>
+          <span className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-700'}`}>{animatedTotal.toLocaleString()}</span>
+        </div>
+        <div className={`px-2.5 py-1 rounded-lg ${isDark ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
+          <span className={`text-[10px] block ${isDark ? 'text-emerald-400/70' : 'text-emerald-500'}`}>Session</span>
+          <span className={`text-base font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+            +{(totals.sessionAdded + deltaData.added).toLocaleString()}
+          </span>
+        </div>
       </div>
-    </Panel>
+
+      {/* Delta since last rotation */}
+      <div className={`p-2 rounded-lg ${isDark ? 'bg-slate-700/40' : 'bg-slate-100'}`}>
+        <span className={`text-[10px] block mb-1.5 ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>Changes This View</span>
+        <div className="grid grid-cols-2 gap-2">
+          <div className={`p-1.5 rounded text-center ${isDark ? 'bg-emerald-500/15' : 'bg-emerald-100'}`}>
+            <span className={`text-lg font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>+{deltaData.added}</span>
+            <span className={`text-[10px] block ${isDark ? 'text-emerald-400/70' : 'text-emerald-500'}`}>added</span>
+          </div>
+          <div className={`p-1.5 rounded text-center ${isDark ? 'bg-red-500/15' : 'bg-red-100'}`}>
+            <span className={`text-lg font-bold ${isDark ? 'text-red-400' : 'text-red-600'}`}>-{deltaData.removed}</span>
+            <span className={`text-[10px] block ${isDark ? 'text-red-400/70' : 'text-red-500'}`}>removed</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Language breakdown */}
+      <div>
+        <div className="flex h-1.5 rounded-full overflow-hidden gap-0.5">
+          {byLanguage.map((lang) => (
+            <div key={lang.lang} className={`${lang.color} rounded-sm`} style={{ width: `${lang.percent}%` }} title={`${lang.lang}: ${lang.percent}%`} />
+          ))}
+        </div>
+        <div className="flex justify-between mt-1">
+          {byLanguage.slice(0, 3).map((lang) => (
+            <span key={lang.lang} className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              {lang.lang} {lang.percent}%
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 };
 
 // ============ PROJECTS VIEW ============
 
-const ProjectsView = ({ theme, onSelectProject }: { theme: ThemeMode; onSelectProject: (name: string) => void }) => {
+const ProjectsView = ({ theme, onSelectProject }: { theme: ThemeMode; onSelectProject: (id: string, name: string) => void }) => {
   const isDark = theme === 'dark';
   const [selectedProject, setSelectedProject] = useState<string | null>('1');
 
@@ -1872,7 +2253,7 @@ const ProjectsView = ({ theme, onSelectProject }: { theme: ThemeMode; onSelectPr
     setSelectedProject(projectId);
     const project = projects.find(p => p.id === projectId);
     if (project) {
-      onSelectProject(project.name);
+      onSelectProject(project.id, project.name);
     }
   };
 
@@ -2022,7 +2403,7 @@ const ProjectsView = ({ theme, onSelectProject }: { theme: ThemeMode; onSelectPr
                     </div>
                   </div>
                   <button
-                    onClick={() => onSelectProject(selectedProjectData.name)}
+                    onClick={() => onSelectProject(selectedProjectData.id, selectedProjectData.name)}
                     className="px-4 py-2 rounded-lg font-medium transition-colors bg-teal-600 hover:bg-teal-500 text-white"
                   >
                     Open Workspace
@@ -2140,18 +2521,9 @@ export default function UnifiedDashboard() {
   const [showGitHub, setShowGitHub] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showGateApproval, setShowGateApproval] = useState(false);
-  const [selectedPhase, setSelectedPhase] = useState<Phase>('plan');
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [currentProjectName, setCurrentProjectName] = useState('E-Commerce Platform');
   const [isCenterExpanded, setIsCenterExpanded] = useState(false);
-  const currentGate = 3;
-
-  const getPhase = (gate: number): Phase => {
-    if (gate <= 3) return 'plan';
-    if (gate <= 6) return 'dev';
-    return 'ship';
-  };
-
-  const currentPhase = getPhase(currentGate);
   const isDark = theme === 'dark';
 
   // Prefetch projects for future use
@@ -2174,7 +2546,8 @@ export default function UnifiedDashboard() {
     // Handle denial - would send message to orchestrator
   };
 
-  const handleSelectProject = (name: string) => {
+  const handleSelectProject = (id: string, name: string) => {
+    setCurrentProjectId(id);
     setCurrentProjectName(name);
     setMainView('dashboard');
   };
@@ -2280,12 +2653,8 @@ export default function UnifiedDashboard() {
             <AgentOrchestratorPanel theme={theme} />
           </div>
 
-          {/* Center Panel - Expands into right panel when isCenterExpanded is true */}
-          <motion.div
-            className="flex-1 min-w-[380px]"
-            layout
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-          >
+          {/* Center Panel - Now takes full remaining width */}
+          <div className="flex-1 min-w-[380px]">
             <WorkspacePanel
               activeTab={activeTab}
               onTabChange={setActiveTab}
@@ -2293,44 +2662,14 @@ export default function UnifiedDashboard() {
               isExpanded={isCenterExpanded}
               onToggleExpand={() => setIsCenterExpanded(!isCenterExpanded)}
             />
-          </motion.div>
+          </div>
 
-          {/* Right Panel - Project Metrics (Hidden when expanded) */}
-          <AnimatePresence>
-            {!isCenterExpanded && (
-              <motion.div
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 340, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
-                transition={{ duration: 0.3, ease: 'easeInOut' }}
-                className={`w-[340px] min-w-[320px] pl-1 h-full flex flex-col p-2 ${isDark ? 'bg-slate-900/30' : ''}`}
-              >
-                {/* ===== PROJECT METRICS SECTION ===== */}
-                <div className="flex flex-col gap-2 h-full">
-                  <div className={`px-2 py-1.5 rounded flex-shrink-0 ${isDark ? 'bg-teal-500/10' : 'bg-teal-100'}`}>
-                    <h4 className={`text-[9px] font-bold uppercase tracking-widest text-center ${isDark ? 'text-teal-400' : 'text-teal-700'}`}>Project Metrics</h4>
-                  </div>
-                  <PhaseSelector
-                    currentPhase={currentPhase}
-                    selectedPhase={selectedPhase}
-                    onPhaseSelect={setSelectedPhase}
-                    theme={theme}
-                  />
-                  <TeamWidget phase={selectedPhase} theme={theme} expanded />
-                  <GateProgressRing
-                    currentGate={currentGate}
-                    selectedPhase={selectedPhase}
-                    theme={theme}
-                    onGateClick={() => setShowGateApproval(true)}
-                    expanded
-                  />
-                  <TokenCounterWidget selectedPhase={selectedPhase} theme={theme} expanded />
-                  <MomentumWidget theme={theme} expanded />
-                  <LinesOfCodeWidget theme={theme} expanded />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* Floating Metrics Card */}
+          <FloatingMetricsCard
+            theme={theme}
+            projectId={currentProjectId}
+            onGateClick={() => setShowGateApproval(true)}
+          />
         </div>
       )}
     </div>

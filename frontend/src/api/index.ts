@@ -6,3 +6,4 @@ export * from './gates';
 export * from './documents';
 export * from './specifications';
 export * from './agents';
+export * from './metrics';

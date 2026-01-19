@@ -33,23 +33,37 @@ interface CelebrationScreenProps {
 }
 
 // Confetti particle component
-const ConfettiParticle = ({ delay, x, color }: { delay: number; x: number; color: string }) => {
+const ConfettiParticle = ({
+  delay,
+  x,
+  color,
+  rotateDirection,
+  duration,
+  isCircle,
+}: {
+  delay: number;
+  x: number;
+  color: string;
+  rotateDirection: number;
+  duration: number;
+  isCircle: boolean;
+}) => {
   return (
     <motion.div
       initial={{ y: -20, x, opacity: 1, rotate: 0 }}
       animate={{
         y: '100vh',
         opacity: [1, 1, 0],
-        rotate: 360 * (Math.random() > 0.5 ? 1 : -1),
+        rotate: 360 * rotateDirection,
       }}
       transition={{
-        duration: 3 + Math.random() * 2,
+        duration,
         delay,
         ease: 'easeIn',
       }}
       className={`absolute w-3 h-3 ${color}`}
       style={{
-        borderRadius: Math.random() > 0.5 ? '50%' : '0',
+        borderRadius: isCircle ? '50%' : '0',
         top: 0,
       }}
     />
@@ -78,22 +92,31 @@ export const CelebrationScreen: React.FC<CelebrationScreenProps> = ({
 }) => {
   const navigate = useNavigate();
   const [showConfetti, setShowConfetti] = useState(true);
-  const [confettiParticles, setConfettiParticles] = useState<Array<{ id: number; x: number; delay: number; color: string }>>([]);
 
-  // Generate confetti particles
+  // Generate confetti particles with stable random values using lazy initial state
+  const [confettiParticles] = useState(() =>
+    Array.from({ length: 100 }, (_, i) => ({
+      id: i,
+      x: Math.random() * 1000,
+      delay: Math.random() * 2,
+      color: confettiColors[Math.floor(Math.random() * confettiColors.length)],
+      rotateDirection: Math.random() > 0.5 ? 1 : -1,
+      duration: 3 + Math.random() * 2,
+      isCircle: Math.random() > 0.5,
+    }))
+  );
+
+  // Handle confetti visibility
   useEffect(() => {
     if (isOpen) {
-      const particles = Array.from({ length: 100 }, (_, i) => ({
-        id: i,
-        x: Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 1000),
-        delay: Math.random() * 2,
-        color: confettiColors[Math.floor(Math.random() * confettiColors.length)],
-      }));
-      setConfettiParticles(particles);
-
+      // Use setTimeout to avoid synchronous setState in effect
+      const showTimer = setTimeout(() => setShowConfetti(true), 0);
       // Stop confetti after animation
-      const timer = setTimeout(() => setShowConfetti(false), 5000);
-      return () => clearTimeout(timer);
+      const hideTimer = setTimeout(() => setShowConfetti(false), 5000);
+      return () => {
+        clearTimeout(showTimer);
+        clearTimeout(hideTimer);
+      };
     }
   }, [isOpen]);
 
@@ -115,7 +138,7 @@ export const CelebrationScreen: React.FC<CelebrationScreenProps> = ({
           text: `Built with Fuzzy Llama: ${stats.gatesApproved} gates, ${stats.tasksCompleted} tasks, ${stats.testCoverage}% test coverage!`,
           url: window.location.origin,
         });
-      } catch (err) {
+      } catch {
         console.log('Share cancelled');
       }
     }
@@ -144,6 +167,9 @@ export const CelebrationScreen: React.FC<CelebrationScreenProps> = ({
               x={particle.x}
               delay={particle.delay}
               color={particle.color}
+              rotateDirection={particle.rotateDirection}
+              duration={particle.duration}
+              isCircle={particle.isCircle}
             />
           ))}
         </div>

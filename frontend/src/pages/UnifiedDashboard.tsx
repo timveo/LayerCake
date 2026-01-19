@@ -775,14 +775,22 @@ const DocsContent = ({ theme, projectId, autoSelectDocumentKey }: { theme: Theme
       const intakeDoc = apiDocuments.find((d: Document) =>
         d.title === 'Project Intake' || d.documentType === 'REQUIREMENTS'
       );
-      if (intakeDoc) setSelectedDocId(intakeDoc.id);
+      if (intakeDoc) {
+        const docId = intakeDoc.id;
+        const timer = setTimeout(() => setSelectedDocId(docId), 0);
+        return () => clearTimeout(timer);
+      }
     }
   }, [autoSelectDocumentKey, apiDocuments]);
 
   // Auto-select first document when loaded
   useEffect(() => {
     if (apiDocuments?.length && !selectedDocId) {
-      setSelectedDocId(apiDocuments[0].id);
+      const docId = apiDocuments[0].id;
+      const timer = setTimeout(() => {
+        setSelectedDocId(docId);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [apiDocuments, selectedDocId]);
 

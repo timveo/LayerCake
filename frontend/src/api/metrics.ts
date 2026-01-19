@@ -132,13 +132,13 @@ export const metricsApi = {
   },
 
   // Get directory tree for code stats
-  getDirectoryTree: async (projectId: string): Promise<any> => {
+  getDirectoryTree: async (projectId: string): Promise<unknown> => {
     const response = await apiClient.get(`/code-generation/${projectId}/tree`);
     return response.data;
   },
 
   // Get agent execution history for a project
-  getAgentHistory: async (projectId: string): Promise<any[]> => {
+  getAgentHistory: async (projectId: string): Promise<unknown[]> => {
     const response = await apiClient.get(`/agents/history?projectId=${projectId}`);
     return response.data;
   },

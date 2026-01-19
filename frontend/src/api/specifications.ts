@@ -5,7 +5,7 @@ export interface CreateSpecificationData {
   projectId: string;
   name: string;
   specificationType: SpecificationType;
-  content: Record<string, any>;
+  content: Record<string, unknown>;
   description?: string;
   agentId?: string;
   gateId?: string;
@@ -14,7 +14,7 @@ export interface CreateSpecificationData {
 
 export interface UpdateSpecificationData {
   name?: string;
-  content?: Record<string, any>;
+  content?: Record<string, unknown>;
   description?: string;
 }
 

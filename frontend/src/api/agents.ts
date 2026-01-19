@@ -6,7 +6,7 @@ export interface ExecuteAgentData {
   agentType: string;
   inputPrompt: string;
   model?: string;
-  contextData?: Record<string, any>;
+  contextData?: Record<string, unknown>;
 }
 
 export const agentsApi = {

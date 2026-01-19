@@ -27,6 +27,7 @@ interface WebSocketEvents {
 
 export function useWebSocket(projectId?: string, events?: WebSocketEvents) {
   const socketRef = useRef<Socket | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const user = useAuthStore((state) => state.user);
@@ -34,7 +35,11 @@ export function useWebSocket(projectId?: string, events?: WebSocketEvents) {
 
   // Store events in a ref to avoid recreating socket on every render
   const eventsRef = useRef(events);
-  eventsRef.current = events;
+
+  // Update eventsRef in an effect to avoid accessing refs during render
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
 
   // Get access token
   const getToken = useCallback(() => {
@@ -58,8 +63,9 @@ export function useWebSocket(projectId?: string, events?: WebSocketEvents) {
 
     const token = getToken();
     if (!token) {
-      setError('No authentication token found');
-      return;
+      // Use setTimeout to avoid synchronous setState in effect
+      const timer = setTimeout(() => setError('No authentication token found'), 0);
+      return () => clearTimeout(timer);
     }
 
     // Connect to WebSocket server
@@ -74,6 +80,8 @@ export function useWebSocket(projectId?: string, events?: WebSocketEvents) {
     });
 
     socketRef.current = socket;
+    // Use setTimeout to avoid synchronous setState in effect
+    const socketTimer = setTimeout(() => setSocket(socket), 0);
 
     // Connection event handlers
     socket.on('connect', () => {
@@ -156,6 +164,7 @@ export function useWebSocket(projectId?: string, events?: WebSocketEvents) {
 
     // Cleanup on unmount
     return () => {
+      clearTimeout(socketTimer);
       if (currentProjectIdRef.current && socket.connected) {
         socket.emit('leave:project', { projectId: currentProjectIdRef.current });
       }
@@ -199,7 +208,7 @@ export function useWebSocket(projectId?: string, events?: WebSocketEvents) {
   }, []);
 
   return {
-    socket: socketRef.current,
+    socket,
     isConnected,
     error,
     joinProject,

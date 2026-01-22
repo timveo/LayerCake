@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { getGateConfig, getDeliverablesForGate } from '../gate-config';
 
 // Gate progression order (G1-G9, no G0)
 const GATE_PROGRESSION = [
@@ -35,7 +36,12 @@ export class GateStateMachineService {
   /**
    * Initialize gates for a new project
    */
-  async initializeProjectGates(projectId: string): Promise<void> {
+  async initializeProjectGates(projectId: string, projectType?: string): Promise<void> {
+    const type = projectType || 'traditional';
+
+    // Get G1_PENDING config from centralized gate config
+    const config = getGateConfig(type, 'G1_PENDING');
+
     // Create G1_PENDING gate (scope/intake approval)
     // G1 is the first gate - no G0 in the Multi-Agent-Product-Creator framework
     await this.prisma.gate.create({
@@ -43,10 +49,32 @@ export class GateStateMachineService {
         projectId,
         gateType: 'G1_PENDING',
         status: 'PENDING',
-        description: 'Project scope approval - intake questionnaire complete',
-        passingCriteria: 'User has approved project scope, vision, goals, and constraints',
+        description:
+          config?.description || 'Project scope approval - intake questionnaire complete',
+        passingCriteria:
+          config?.passingCriteria ||
+          'User has approved project scope, vision, goals, and constraints',
+        requiresProof: config?.requiresProof ?? false,
       },
     });
+
+    // Create initial deliverables for G1_PENDING
+    const deliverables = getDeliverablesForGate(type, 'G1_PENDING');
+    if (deliverables.length > 0) {
+      await this.prisma.deliverable.createMany({
+        data: deliverables.map((d) => ({
+          projectId,
+          name: d.name,
+          path: d.path,
+          owner: d.owner,
+          status: 'not_started',
+        })),
+      });
+
+      console.log(
+        `[GateStateMachine] Initialized project with ${deliverables.length} deliverables for G1_PENDING`,
+      );
+    }
   }
 
   /**
@@ -337,117 +365,50 @@ export class GateStateMachineService {
   }
 
   /**
-   * Create next gate in progression
+   * Create next gate in progression with deliverables
    */
   private async createNextGate(projectId: string, gateType: string): Promise<void> {
-    // Gate descriptions and criteria
-    const gateConfig: Record<
-      string,
-      { description: string; passingCriteria: string; requiresProof: boolean }
-    > = {
-      G1_COMPLETE: {
-        description: 'Intake complete, requirements gathered',
-        passingCriteria: 'User has reviewed and approved the intake summary',
-        requiresProof: false,
-      },
-      G2_PENDING: {
-        description: 'PRD creation in progress',
-        passingCriteria: 'Product Manager has created complete PRD with user stories',
-        requiresProof: false,
-      },
-      G2_COMPLETE: {
-        description: 'PRD approved',
-        passingCriteria: 'User has reviewed and approved the PRD',
-        requiresProof: false,
-      },
-      G3_PENDING: {
-        description: 'Architecture and specifications in progress',
-        passingCriteria: 'Architect has created OpenAPI spec, Prisma schema, and Zod schemas',
-        requiresProof: true,
-      },
-      G3_COMPLETE: {
-        description: 'Architecture approved, specs locked',
-        passingCriteria: 'User has reviewed and approved the architecture and specs',
-        requiresProof: true,
-      },
-      G4_PENDING: {
-        description: 'Design in progress',
-        passingCriteria: 'UX/UI Designer has created 3 design options, user has selected one',
-        requiresProof: false,
-      },
-      G4_COMPLETE: {
-        description: 'Design approved',
-        passingCriteria: 'User has reviewed and approved the final design',
-        requiresProof: false,
-      },
-      G5_PENDING: {
-        description: 'Development in progress',
-        passingCriteria: 'Developers have implemented features, all builds passing',
-        requiresProof: true,
-      },
-      G5_COMPLETE: {
-        description: 'Development complete',
-        passingCriteria: 'User has reviewed code, all tests passing',
-        requiresProof: true,
-      },
-      G6_PENDING: {
-        description: 'Testing in progress',
-        passingCriteria: 'QA Engineer has created and executed test plan, >80% coverage',
-        requiresProof: true,
-      },
-      G6_COMPLETE: {
-        description: 'Testing complete',
-        passingCriteria: 'User has reviewed test results, all critical tests passing',
-        requiresProof: true,
-      },
-      G7_PENDING: {
-        description: 'Security audit in progress',
-        passingCriteria: 'Security Engineer has completed OWASP audit, no critical issues',
-        requiresProof: true,
-      },
-      G7_COMPLETE: {
-        description: 'Security audit complete',
-        passingCriteria: 'User has reviewed security audit, all issues addressed',
-        requiresProof: true,
-      },
-      G8_PENDING: {
-        description: 'Staging deployment in progress',
-        passingCriteria: 'DevOps has deployed to staging, smoke tests passing',
-        requiresProof: true,
-      },
-      G8_COMPLETE: {
-        description: 'Staging deployment complete',
-        passingCriteria: 'User has tested staging environment, ready for production',
-        requiresProof: true,
-      },
-      G9_PENDING: {
-        description: 'Production deployment in progress',
-        passingCriteria: 'DevOps has deployed to production, health checks passing',
-        requiresProof: true,
-      },
-      G9_COMPLETE: {
-        description: 'Production deployment complete',
-        passingCriteria: 'Application is live and operational',
-        requiresProof: true,
-      },
-    };
+    // Get project type for project-specific configuration
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { type: true },
+    });
 
-    const config = gateConfig[gateType] || {
-      description: `Gate ${gateType}`,
-      passingCriteria: 'Complete gate requirements',
-      requiresProof: false,
-    };
+    const projectType = project?.type || 'traditional';
 
+    // Get gate configuration from centralized config
+    const config = getGateConfig(projectType, gateType);
+
+    // Create the gate
     await this.prisma.gate.create({
       data: {
         projectId,
         gateType,
         status: 'PENDING',
-        description: config.description,
-        passingCriteria: config.passingCriteria,
-        requiresProof: config.requiresProof,
+        description: config?.description || `Gate ${gateType}`,
+        passingCriteria: config?.passingCriteria || 'Complete gate requirements',
+        requiresProof: config?.requiresProof ?? false,
       },
     });
+
+    // Create deliverables for this gate
+    const deliverables = getDeliverablesForGate(projectType, gateType);
+    if (deliverables.length > 0) {
+      await this.prisma.deliverable.createMany({
+        data: deliverables.map((d) => ({
+          projectId,
+          name: d.name,
+          path: d.path,
+          owner: d.owner,
+          status: 'not_started',
+        })),
+      });
+
+      console.log(
+        `[GateStateMachine] Created ${deliverables.length} deliverables for gate ${gateType}:`,
+        deliverables.map((d) => d.name).join(', '),
+      );
+    }
   }
 
   /**

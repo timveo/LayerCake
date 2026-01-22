@@ -275,6 +275,142 @@ export class CostTrackingService {
   }
 
   /**
+   * Log cost for a single agent execution and update COST_LOG document
+   * This is called after each agent completes to track real-time costs
+   */
+  async logAgentCost(
+    projectId: string,
+    agentType: string,
+    gateType: string,
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+  ): Promise<{ cost: number; totalProjectCost: number }> {
+    const cost = this.calculateAgentCost(model, inputTokens, outputTokens);
+
+    // Update the COST_LOG document with this agent's usage
+    await this.updateCostLogDocument(projectId, {
+      date: new Date().toISOString().split('T')[0],
+      gate: gateType,
+      agent: agentType,
+      model,
+      inputTokens,
+      outputTokens,
+      cost,
+    });
+
+    // Get total project cost
+    const projectCosts = await this.getProjectCosts(projectId);
+
+    return {
+      cost,
+      totalProjectCost: projectCosts.totalCost,
+    };
+  }
+
+  /**
+   * Update the COST_LOG document with new usage entry
+   */
+  async updateCostLogDocument(
+    projectId: string,
+    entry: {
+      date: string;
+      gate: string;
+      agent: string;
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+      cost: number;
+    },
+  ): Promise<void> {
+    // Find the Cost Log document
+    const costLogDoc = await this.prisma.document.findFirst({
+      where: {
+        projectId,
+        title: 'Cost Log',
+      },
+    });
+
+    if (!costLogDoc) {
+      console.log('[CostTracking] Cost Log document not found for project:', projectId);
+      return;
+    }
+
+    // Get project costs for totals
+    const projectCosts = await this.getProjectCosts(projectId);
+
+    // Format agent name for display
+    const agentDisplay = entry.agent
+      .split('_')
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+
+    // Build new table row
+    const newRow = `| ${entry.date} | ${entry.gate} | ${agentDisplay} | ${entry.model} | ${entry.inputTokens.toLocaleString()} | ${entry.outputTokens.toLocaleString()} | $${entry.cost.toFixed(4)} |`;
+
+    // Parse current content and insert new row
+    let content = costLogDoc.content;
+
+    // Find the "Token Usage by Gate" table and add the new row
+    const tableMatch = content.match(
+      /## Token Usage by Gate\s*\n\n\| Date \| Gate \| Agent \| Model \| Input Tokens \| Output Tokens \| Est\. Cost \|\n\|[-|\s]+\|\n([\s\S]*?)\n\n---/,
+    );
+
+    if (tableMatch) {
+      const existingRows = tableMatch[1].trim();
+      let newTableContent: string;
+
+      // Replace placeholder row if exists, otherwise append
+      if (existingRows.includes('| - | - |') || existingRows.trim() === '') {
+        // Replace placeholder with actual data
+        newTableContent = newRow;
+      } else {
+        // Append new row
+        newTableContent = existingRows + '\n' + newRow;
+      }
+
+      content = content.replace(
+        /## Token Usage by Gate\s*\n\n\| Date \| Gate \| Agent \| Model \| Input Tokens \| Output Tokens \| Est\. Cost \|\n\|[-|\s]+\|\n[\s\S]*?\n\n---/,
+        `## Token Usage by Gate
+
+| Date | Gate | Agent | Model | Input Tokens | Output Tokens | Est. Cost |
+|------|------|-------|-------|--------------|---------------|-----------|
+${newTableContent}
+
+---`,
+      );
+    }
+
+    // Update running totals section
+    content = content.replace(
+      /## Running Totals\s*\n\n\| Metric \| Value \|\n\|[-|\s]+\|\n[\s\S]*?\n\n---/,
+      `## Running Totals
+
+| Metric | Value |
+|--------|-------|
+| **Total Input Tokens** | ${projectCosts.totalInputTokens.toLocaleString()} |
+| **Total Output Tokens** | ${projectCosts.totalOutputTokens.toLocaleString()} |
+| **Total Estimated Cost** | $${projectCosts.totalCost.toFixed(4)} |
+| **Agent Executions** | ${projectCosts.totalAgentExecutions} |
+
+---`,
+    );
+
+    // Update the document
+    await this.prisma.document.update({
+      where: { id: costLogDoc.id },
+      data: {
+        content,
+        updatedAt: new Date(),
+      },
+    });
+
+    console.log(
+      `[CostTracking] Updated Cost Log: ${agentDisplay} at ${entry.gate} - $${entry.cost.toFixed(4)}`,
+    );
+  }
+
+  /**
    * Get cost estimate for a gate based on historical data
    */
   async estimateGateCost(gateType: string): Promise<{

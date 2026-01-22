@@ -86,11 +86,15 @@ export class GateDocumentsService {
           { title: 'Feedback Log', template: 'FEEDBACK_LOG' },
           { title: 'Cost Log', template: 'COST_LOG' },
           { title: 'Project Context', template: 'PROJECT_CONTEXT' },
+          { title: 'Agent Log', template: 'AGENT_LOG' },
         ];
       case 'G2':
         return [{ title: 'Change Requests', template: 'CHANGE_REQUESTS' }];
       case 'G9':
-        return [{ title: 'Post Launch', template: 'POST_LAUNCH' }];
+        return [
+          { title: 'Post Launch', template: 'POST_LAUNCH' },
+          { title: 'Completion Report', template: 'COMPLETION_REPORT' },
+        ];
       default:
         return [];
     }
@@ -365,6 +369,200 @@ Track post-launch activities, monitoring, and follow-up actions.
 ---
 
 *Auto-generated after G9 approval on ${today}*
+`;
+
+      case 'AGENT_LOG':
+        return `# Agent Execution Log - ${projectName}
+
+## Purpose
+
+Track all AI agent executions throughout the project lifecycle. This log provides:
+- Visibility into which agents ran and when
+- Duration and outcome tracking
+- Debugging information for troubleshooting
+- Audit trail for compliance
+
+---
+
+## Agent Executions
+
+| Timestamp | Gate | Agent | Task | Duration | Outcome |
+|-----------|------|-------|------|----------|---------|
+| ${today} | G1 | PM Onboarding | Project intake interview | - | Started |
+
+---
+
+## Summary by Agent
+
+| Agent | Total Executions | Successful | Failed |
+|-------|-----------------|------------|--------|
+| *Collecting...* | - | - | - |
+
+---
+
+## Summary by Gate
+
+| Gate | Agents Run | Total Duration | Status |
+|------|------------|----------------|--------|
+| G1 | 1 | - | In Progress |
+
+---
+
+## Notes
+
+- Agent executions are logged automatically after each completion
+- Duration is calculated from start to finish
+- Failed executions include error details in the Outcome column
+
+---
+
+*Auto-generated after G1 approval on ${today}*
+`;
+
+      case 'COMPLETION_REPORT':
+        return `# Completion Report - ${projectName}
+
+## Purpose
+
+This comprehensive report summarizes the entire project from inception to deployment, documenting all gates passed, agents involved, deliverables created, and lessons learned.
+
+---
+
+## Project Summary
+
+| Attribute | Value |
+|-----------|-------|
+| **Project Name** | ${projectName} |
+| **Completed** | ${today} |
+| **Total Gates** | 9 (G1-G9) |
+| **Status** | Production Deployed |
+
+---
+
+## Gate History
+
+| Gate | Name | Approved Date | Approver | Duration |
+|------|------|---------------|----------|----------|
+| G1 | Scope Approved | - | - | - |
+| G2 | PRD Approved | - | - | - |
+| G3 | Architecture Approved | - | - | - |
+| G4 | Design Approved | - | - | - |
+| G5 | Feature Acceptance | - | - | - |
+| G6 | Quality Sign-off | - | - | - |
+| G7 | Security Acceptance | - | - | - |
+| G8 | Go/No-Go | - | - | - |
+| G9 | Production Acceptance | ${today} | User | - |
+
+---
+
+## Agent Contributions
+
+| Agent | Executions | Key Deliverables |
+|-------|------------|------------------|
+| PM Onboarding | 1 | Project Intake |
+| Product Manager | 1 | PRD |
+| Architect | 1 | OpenAPI, Prisma Schema, Architecture Doc |
+| UX/UI Designer | 1 | Design System, Mockups |
+| Frontend Developer | 1+ | Frontend Implementation |
+| Backend Developer | 1+ | Backend Implementation |
+| QA Engineer | 1+ | Test Plan, Test Results |
+| Security Engineer | 1 | Security Audit Report |
+| DevOps Engineer | 2 | Staging Deploy, Production Deploy |
+
+---
+
+## Deliverables Checklist
+
+### Planning Phase (G1-G4)
+- [ ] Project Intake Document
+- [ ] Product Requirements Document (PRD)
+- [ ] System Architecture Document
+- [ ] API Specification (OpenAPI)
+- [ ] Database Schema (Prisma)
+- [ ] Design System
+- [ ] UI Mockups
+
+### Development Phase (G5-G6)
+- [ ] Frontend Code
+- [ ] Backend Code
+- [ ] Unit Tests (>80% coverage)
+- [ ] Integration Tests
+- [ ] Test Results Report
+
+### Ship Phase (G7-G9)
+- [ ] Security Audit Report
+- [ ] Staging Deployment
+- [ ] Production Deployment
+- [ ] Post-Launch Monitoring
+
+---
+
+## Cost Summary
+
+| Metric | Value |
+|--------|-------|
+| **Total Input Tokens** | - |
+| **Total Output Tokens** | - |
+| **Total Estimated Cost** | $0.00 |
+| **Agent Executions** | - |
+
+*See COST_LOG.md for detailed breakdown*
+
+---
+
+## Test Metrics
+
+| Metric | Value | Target |
+|--------|-------|--------|
+| **Code Coverage** | - | >80% |
+| **Unit Tests** | - | Pass |
+| **Integration Tests** | - | Pass |
+| **E2E Tests** | - | Pass |
+| **Security Vulnerabilities** | 0 | 0 Critical/High |
+
+---
+
+## Security Summary
+
+| Check | Status |
+|-------|--------|
+| OWASP Top 10 | - |
+| Authentication | - |
+| Authorization | - |
+| Data Protection | - |
+| Input Validation | - |
+
+---
+
+## Lessons Learned
+
+### What Worked Well
+1. *To be filled by user or orchestrator*
+
+### What Could Be Improved
+1. *To be filled by user or orchestrator*
+
+### Recommendations for Future Projects
+1. *To be filled by user or orchestrator*
+
+---
+
+## Acknowledgments
+
+This project was built using the FuzzyLlama multi-agent system with the following AI agents:
+- Product Manager Onboarding
+- Product Manager
+- Architect
+- UX/UI Designer
+- Frontend Developer
+- Backend Developer
+- QA Engineer
+- Security Engineer
+- DevOps Engineer
+
+---
+
+*Auto-generated Completion Report on ${today}*
 `;
 
       default:

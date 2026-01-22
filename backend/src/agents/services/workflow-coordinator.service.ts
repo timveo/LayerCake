@@ -6,6 +6,10 @@ import { GateStateMachineService } from '../../gates/services/gate-state-machine
 import { AppWebSocketGateway } from '../../websocket/websocket.gateway';
 import { AIProviderService } from './ai-provider.service';
 import { GateDocumentsService } from '../../documents/services/gate-documents.service';
+import { EventStoreService } from '../../events/event-store.service';
+import { SessionContextService } from '../../session-context/session-context.service';
+import { GitIntegrationService } from '../../code-generation/git-integration.service';
+import { getAgentsForGate, getAgentTaskDescription, isParallelGate } from '../../gates/gate-config';
 
 /**
  * WorkflowCoordinator orchestrates the complete G0-G9 workflow
@@ -22,6 +26,9 @@ export class WorkflowCoordinatorService {
     private readonly wsGateway: AppWebSocketGateway,
     private readonly aiProvider: AIProviderService,
     private readonly gateDocuments: GateDocumentsService,
+    private readonly eventStore: EventStoreService,
+    private readonly sessionContext: SessionContextService,
+    private readonly gitIntegration: GitIntegrationService,
   ) {}
 
   /**
@@ -209,55 +216,53 @@ Begin by warmly acknowledging their project idea, then ask your FIRST question a
     );
 
     // ============================================================
-    // G1 APPROVAL FLOW (Single Step)
-    // When intake exists and user says approve, approve the gate
+    // GATE APPROVAL FLOW (G1-G9)
+    // Handles approval for any gate that's in PENDING or IN_REVIEW status
     // ============================================================
 
-    if (isApprovalMessage && intakeDocument) {
-      console.log('Processing G1 approval for project:', projectId);
+    if (isApprovalMessage && currentGate) {
+      const gateType = currentGate.gateType;
+      const gateNumber = this.extractGateNumber(gateType);
 
-      // Ensure gate is in review state, then approve
-      const gateStatus = currentGate?.status;
-      if (gateStatus !== 'IN_REVIEW') {
-        await this.gateStateMachine.transitionToReview(projectId, 'G1_PENDING', {
-          description: 'G1 - Project Scope ready for approval',
+      // G1 requires the intake document to be present
+      if (gateNumber === 1 && !intakeDocument) {
+        // Don't process G1 approval without intake document
+        // Fall through to normal message handling
+      } else if (currentGate.status === 'PENDING' || currentGate.status === 'IN_REVIEW') {
+        console.log(`Processing gate approval for ${gateType} on project:`, projectId);
+
+        // Transition to review if needed
+        if (currentGate.status !== 'IN_REVIEW') {
+          await this.gateStateMachine.transitionToReview(projectId, gateType, {
+            description: `${gateType} ready for approval`,
+          });
+        }
+
+        // Approve the gate
+        await this.gateStateMachine.approveGate(
+          projectId,
+          gateType,
+          userId,
+          'approved',
+          'User approved via chat',
+        );
+
+        // Trigger post-approval processing
+        await this.onGateApproved(projectId, gateType, userId);
+
+        // Generate gate-specific confirmation message
+        const confirmationMessage = this.getGateApprovalConfirmation(gateNumber, gateType);
+
+        const eventId = `g${gateNumber}-approved`;
+        this.wsGateway.emitAgentChunk(projectId, eventId, confirmationMessage);
+        this.wsGateway.emitAgentCompleted(projectId, eventId, {
+          content: confirmationMessage,
+          usage: { inputTokens: 0, outputTokens: 0 },
+          finishReason: 'end_turn',
         });
+
+        return { agentExecutionId: `g${gateNumber}-approval-processed`, gateApproved: true };
       }
-
-      // Approve the gate
-      await this.gateStateMachine.approveGate(
-        projectId,
-        'G1_PENDING',
-        userId,
-        'approved',
-        'User approved via chat',
-      );
-
-      // Trigger post-approval processing (creates tasks, post-G1 documents)
-      await this.onGateApproved(projectId, 'G1_PENDING', userId);
-
-      // Send confirmation message
-      const approvalConfirmation = `## G1 Approved - Project Scope Confirmed
-
-Your project scope has been approved and tasks have been created for all agents.
-
-**Ready for G2 - Product Requirements**
-
-The Product Manager agent can now create your **Product Requirements Document (PRD)** which includes:
-- User stories and acceptance criteria
-- Feature prioritization
-- Success metrics
-
-Type **"continue"** to start PRD creation, or ask me any questions about the project.`;
-
-      this.wsGateway.emitAgentChunk(projectId, 'g1-approved', approvalConfirmation);
-      this.wsGateway.emitAgentCompleted(projectId, 'g1-approved', {
-        content: approvalConfirmation,
-        usage: { inputTokens: 0, outputTokens: 0 },
-        finishReason: 'end_turn',
-      });
-
-      return { agentExecutionId: 'g1-approval-processed', gateApproved: true };
     }
 
     // ============================================================
@@ -278,23 +283,13 @@ Type **"continue"** to start PRD creation, or ask me any questions about the pro
 
     // ============================================================
     // If intake document exists but G1 not yet approved,
-    // guide them to review and approve
+    // allow user to ask questions about the intake via Orchestrator
     // ============================================================
     if (intakeDocument) {
-      console.log('Intake exists - guiding user to approval');
+      console.log('Intake exists, G1 not approved - allowing user questions');
 
-      const guidanceMessage = `Your Project Intake is ready for review in the **Docs** tab.
-
-Type **"approve"** to approve the intake document and proceed to the planning phase.`;
-
-      this.wsGateway.emitAgentChunk(projectId, 'guidance', guidanceMessage);
-      this.wsGateway.emitAgentCompleted(projectId, 'guidance', {
-        content: guidanceMessage,
-        usage: { inputTokens: 0, outputTokens: 0 },
-        finishReason: 'end_turn',
-      });
-
-      return { agentExecutionId: 'guidance-provided', gateApproved: false };
+      // Use the orchestrator to answer questions about the intake
+      return this.handlePreG1Question(projectId, userId, message, intakeDocument.content || '');
     }
 
     // Get conversation history (previous agent executions for this project)
@@ -328,12 +323,22 @@ Type **"approve"** to approve the intake document and proceed to the planning ph
     }
 
     // Count questions answered based on conversation turns
-    // Turn 0 (initial): Welcome message + Q1 asked
-    // Turn 1: User answers Q1, agent asks Q2
-    // Turn 2: User answers Q2, agent asks Q3
-    // etc.
-    // So after N previous executions, user is on answer N+1
-    const questionsAnsweredSoFar = previousExecutions.length; // Turns completed = questions answered
+    // Turn 0 (initial): Welcome message (NO question asked yet, just intro)
+    // Turn 1: User confirms ready, agent asks Q1 (Existing Code)
+    // Turn 2: User answers Q1, agent asks Q2 (Technical Background)
+    // Turn 3: User answers Q2, agent asks Q3 (Success Criteria)
+    // Turn 4: User answers Q3, agent asks Q4 (Constraints)
+    // Turn 5: User answers Q4, agent asks Q5 (Deployment)
+    // Turn 6: User answers Q5, agent outputs intake document
+    //
+    // So: Turn 0 = 0 questions answered (welcome only)
+    //     Turn 1 = 0 questions answered (user just said "ready", Q1 asked)
+    //     Turn 2 = 1 question answered (Q1 answered, Q2 asked)
+    //     etc.
+    //
+    // Formula: questionsAnsweredSoFar = max(0, previousExecutions.length - 1)
+    // Because turn 0 and turn 1 both have 0 real answers
+    const questionsAnsweredSoFar = Math.max(0, previousExecutions.length - 1);
     const currentQuestionBeingAnswered = questionsAnsweredSoFar + 1; // User is answering this question now
     const nextQuestionToAsk = currentQuestionBeingAnswered + 1; // After they answer, ask this one
 
@@ -391,9 +396,11 @@ Remember: NEVER output the intake document until you have received answers to AL
           });
 
           // Check if the intake document was generated AND all 5 questions were answered
-          // The document should only be created after 5 questions (5 user messages after initial)
+          // The document should only be created after user answers all 5 questions
+          // questionsAnsweredSoFar is before this response, so after this response we have +1 more
           const hasIntakeDocument = response.content.includes('# Project Intake:');
-          const enoughQuestionsAnswered = questionsAnsweredSoFar >= 4; // This message would be answer #5
+          const questionsAfterThisResponse = questionsAnsweredSoFar + 1;
+          const enoughQuestionsAnswered = questionsAfterThisResponse >= 5; // All 5 questions answered
 
           if (hasIntakeDocument && enoughQuestionsAnswered) {
             await this.handleOnboardingComplete(projectId, userId, response.content);
@@ -419,6 +426,83 @@ Remember: NEVER output the intake document until you have received answers to AL
     );
 
     // Return the execution ID - gate approval is now handled separately
+    return { agentExecutionId, gateApproved: false };
+  }
+
+  /**
+   * Handle user questions about the intake BEFORE G1 is approved
+   * Allows users to ask clarifying questions about project classification, etc.
+   */
+  private async handlePreG1Question(
+    projectId: string,
+    userId: string,
+    message: string,
+    intakeContent: string,
+  ): Promise<{ agentExecutionId: string; gateApproved: boolean }> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    });
+
+    // Build the prompt for the orchestrator to answer intake questions
+    const userPrompt = `You are the Project Orchestrator for "${project?.name}".
+
+The user has completed the intake interview and a **Project Intake document** has been created.
+The intake is waiting for G1 approval, but the user has a question first.
+
+**Current State:**
+- Project Intake document is ready
+- G1 (Scope Approval) is PENDING - user has NOT approved yet
+- User is asking a question before approving
+
+**Project Intake Document:**
+${intakeContent.substring(0, 3000)}
+
+**User's Question:**
+"${message}"
+
+**Your Task:**
+1. Answer their question helpfully and directly
+2. Reference specific parts of the intake document when relevant
+3. If they're asking about project classification (traditional vs ai_ml), explain the reasoning
+4. After answering, remind them they can type **"approve"** when ready to proceed, or ask more questions
+
+Keep your response concise and helpful. Don't be pushy about approval.`;
+
+    // Execute the orchestrator agent
+    const agentExecutionId = await this.agentExecution.executeAgentStream(
+      {
+        projectId,
+        agentType: 'ORCHESTRATOR',
+        userPrompt,
+        model: undefined,
+        context: { userMessage: message },
+      },
+      userId,
+      {
+        onChunk: (chunk: string) => {
+          this.wsGateway.emitAgentChunk(projectId, agentExecutionId, chunk);
+        },
+        onComplete: async (response) => {
+          this.wsGateway.emitAgentCompleted(projectId, agentExecutionId, {
+            content: response.content,
+            usage: response.usage,
+            finishReason: response.finishReason,
+          });
+        },
+        onError: (error) => {
+          console.error('Pre-G1 question error:', error);
+          this.wsGateway.emitAgentFailed(projectId, agentExecutionId, error.message);
+        },
+      },
+    );
+
+    this.wsGateway.emitAgentStarted(
+      projectId,
+      agentExecutionId,
+      'ORCHESTRATOR',
+      'Answering your question',
+    );
+
     return { agentExecutionId, gateApproved: false };
   }
 
@@ -513,10 +597,7 @@ Keep your response concise and helpful.`;
   /**
    * Start the Product Manager agent to create the PRD for G2
    */
-  private async startProductManagerAgent(
-    projectId: string,
-    userId: string,
-  ): Promise<string> {
+  private async startProductManagerAgent(projectId: string, userId: string): Promise<string> {
     // Get project and intake document for context
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
@@ -616,8 +697,9 @@ Output the complete PRD document in markdown format.`;
     });
 
     // Transition G2 gate to IN_REVIEW
+    // Note: G2_PENDING should exist after G1 was approved
     try {
-      await this.gateStateMachine.transitionToReview(projectId, 'G1_COMPLETE', {
+      await this.gateStateMachine.transitionToReview(projectId, 'G2_PENDING', {
         description: 'G2 - Product Requirements Document ready for review',
       });
     } catch (error) {
@@ -862,6 +944,10 @@ Please review it and type **"approve"** to proceed, or let me know if you'd like
       return;
     }
 
+    // Create git checkpoint commit for this gate approval
+    // This ensures all work is saved and can be recovered
+    await this.createGitCheckpoint(projectId, gateType, userId);
+
     // Update phase based on gate
     const nextPhase = this.getNextPhaseForGate(gateType);
     if (nextPhase) {
@@ -932,34 +1018,78 @@ Please review it and type **"approve"** to proceed, or let me know if you'd like
         if (createdDocs.length > 0) {
           console.log('Created post-G1 documents:', createdDocs);
 
-          // Notify frontend about new documents
-          for (const docTitle of createdDocs) {
+          // Query the created documents to get their IDs for proper frontend notification
+          const documents = await this.prisma.document.findMany({
+            where: {
+              projectId,
+              title: { in: createdDocs },
+            },
+            select: { id: true, title: true, documentType: true },
+          });
+
+          // Notify frontend about new documents with proper IDs
+          for (const doc of documents) {
             this.wsGateway.emitDocumentCreated(projectId, {
-              id: '', // ID not available from createMany
-              title: docTitle,
-              documentType: 'OTHER',
+              id: doc.id,
+              title: doc.title,
+              documentType: doc.documentType,
             });
           }
         }
-      } else if (gateType === 'G2_PENDING' || gateType === 'G2_COMPLETE') {
-        console.log('Creating post-G2 documents for project:', projectId);
+      } else if (gateType === 'G2_PENDING') {
+        // G2 (PRD) approved - create post-G2 documents and start G3 (Architecture)
+        console.log('G2 approved - creating post-G2 documents and starting G3 agents');
 
         await this.gateDocuments.initializeGateDocuments(projectId, 'G2', userId, {
           projectName: project.name,
         });
-      } else if (gateType === 'G9_PENDING' || gateType === 'G9_COMPLETE') {
-        console.log('Creating post-G9 documents for project:', projectId);
+
+        // Start Architect agent for G3
+        await this.executeGateAgents(projectId, 'G3_PENDING', userId);
+      } else if (gateType === 'G3_PENDING') {
+        // G3 (Architecture) approved - start G4 (Design)
+        console.log('G3 approved - starting G4 (Design) agents');
+        await this.executeGateAgents(projectId, 'G4_PENDING', userId);
+      } else if (gateType === 'G4_PENDING') {
+        // G4 (Design) approved - start G5 (Development) with PARALLEL execution
+        console.log('G4 approved - starting G5 (Development) agents in PARALLEL');
+        await this.executeGateAgents(projectId, 'G5_PENDING', userId);
+      } else if (gateType === 'G5_PENDING') {
+        // G5 (Development) approved - start G6 (Testing)
+        console.log('G5 approved - starting G6 (Testing) agents');
+        await this.executeGateAgents(projectId, 'G6_PENDING', userId);
+      } else if (gateType === 'G6_PENDING') {
+        // G6 (Testing) approved - start G7 (Security)
+        console.log('G6 approved - starting G7 (Security) agents');
+        await this.executeGateAgents(projectId, 'G7_PENDING', userId);
+      } else if (gateType === 'G7_PENDING') {
+        // G7 (Security) approved - start G8 (Staging)
+        console.log('G7 approved - starting G8 (Staging) agents');
+        await this.executeGateAgents(projectId, 'G8_PENDING', userId);
+      } else if (gateType === 'G8_PENDING') {
+        // G8 (Staging) approved - start G9 (Production)
+        console.log('G8 approved - starting G9 (Production) agents');
+        await this.executeGateAgents(projectId, 'G9_PENDING', userId);
+      } else if (gateType === 'G9_PENDING') {
+        // G9 (Production) approved - Project complete!
+        console.log('🎉 PROJECT COMPLETE:', projectId);
 
         await this.gateDocuments.initializeGateDocuments(projectId, 'G9', userId, {
           projectName: project.name,
         });
+
+        await this.eventStore.appendEvent(projectId, {
+          type: 'ProjectCompleted',
+          data: { projectId, projectName: project.name },
+          userId,
+        });
       }
     } catch (error) {
-      console.error('Error creating post-gate documents:', error);
-      // Don't fail the gate approval if document creation fails
+      console.error('Error in post-gate processing:', error);
+      // Don't fail the gate approval if post-processing fails
     }
 
-    // Try to execute next task
+    // Try to execute next task (for any remaining tasks)
     await this.executeNextTask(projectId, userId);
   }
 
@@ -1134,5 +1264,716 @@ Please review it and type **"approve"** to proceed, or let me know if you'd like
       G9_COMPLETE: 'completion',
     };
     return nextPhaseMap[gateType] || null;
+  }
+
+  /**
+   * Extract gate number from gate type string (e.g., "G1_PENDING" -> 1)
+   */
+  private extractGateNumber(gateType: string): number {
+    const match = gateType.match(/G(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  }
+
+  /**
+   * Get gate-specific approval confirmation message
+   */
+  private getGateApprovalConfirmation(gateNumber: number, gateType: string): string {
+    const confirmations: Record<number, string> = {
+      1: `## G1 Approved - Project Scope Confirmed
+
+Your project scope has been approved and tasks have been created for all agents.
+
+**Ready for G2 - Product Requirements**
+
+The Product Manager agent can now create your **Product Requirements Document (PRD)** which includes:
+- User stories and acceptance criteria
+- Feature prioritization
+- Success metrics
+
+Type **"continue"** to start PRD creation, or ask me any questions about the project.`,
+
+      2: `## G2 Approved - Product Requirements Complete
+
+Your Product Requirements Document has been approved.
+
+**Ready for G3 - Architecture**
+
+The Architect agent will now design the system architecture including:
+- API specifications (OpenAPI)
+- Database schema (Prisma)
+- System architecture documentation
+
+The architecture work is starting automatically.`,
+
+      3: `## G3 Approved - Architecture Complete
+
+Your system architecture has been approved.
+
+**Ready for G4 - Design**
+
+The UX/UI Designer agent will now create:
+- Design system and component library
+- UI mockups and wireframes
+- User flow diagrams
+
+The design work is starting automatically.`,
+
+      4: `## G4 Approved - Design Complete
+
+Your design system and UI mockups have been approved.
+
+**Ready for G5 - Development**
+
+The development phase is starting with **parallel execution**:
+- Frontend Developer - Building the UI
+- Backend Developer - Building the API
+
+Development work is starting automatically.`,
+
+      5: `## G5 Approved - Development Complete
+
+Your frontend and backend implementation have been approved.
+
+**Ready for G6 - Testing**
+
+The QA Engineer agent will now:
+- Create comprehensive test plans
+- Execute unit, integration, and E2E tests
+- Ensure >80% code coverage
+
+Testing work is starting automatically.`,
+
+      6: `## G6 Approved - Testing Complete
+
+All tests have passed and coverage requirements are met.
+
+**Ready for G7 - Security Audit**
+
+The Security Engineer agent will now:
+- Perform OWASP security audit
+- Run vulnerability scans
+- Review authentication and authorization
+
+Security audit is starting automatically.`,
+
+      7: `## G7 Approved - Security Audit Complete
+
+Your security audit has passed.
+
+**Ready for G8 - Staging Deployment**
+
+The DevOps Engineer will now:
+- Set up CI/CD pipelines
+- Deploy to staging environment
+- Configure monitoring and alerting
+
+Staging deployment is starting automatically.`,
+
+      8: `## G8 Approved - Staging Deployment Complete
+
+Your staging environment is live and tested.
+
+**Ready for G9 - Production Deployment**
+
+The final deployment phase will:
+- Deploy to production environment
+- Enable production monitoring
+- Complete post-launch checklist
+
+Production deployment is starting automatically.`,
+
+      9: `## 🎉 G9 Approved - Project Complete!
+
+Congratulations! Your project has been successfully deployed to production.
+
+**Project Summary:**
+- All 9 gates completed
+- All deliverables approved
+- Production deployment live
+
+You can view all documentation and artifacts in the Docs tab.`,
+    };
+
+    return (
+      confirmations[gateNumber] ||
+      `## ${gateType} Approved
+
+The gate has been approved and the next phase is starting.`
+    );
+  }
+
+  // ============================================================
+  // PARALLEL AGENT EXECUTION (G2-G9 Workflow)
+  // ============================================================
+
+  /**
+   * Execute agents for a gate - supports parallel execution
+   * Called after gate approval to start the next phase's agents
+   */
+  async executeGateAgents(projectId: string, gateType: string, userId: string): Promise<void> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    });
+
+    if (!project) {
+      console.error(`[WorkflowCoordinator] Project not found: ${projectId}`);
+      return;
+    }
+
+    const projectType = project.type || 'traditional';
+
+    // Get agents for this gate based on project type
+    const agents = getAgentsForGate(projectType, gateType);
+
+    if (agents.length === 0) {
+      console.log(`[WorkflowCoordinator] No agents configured for gate ${gateType}`);
+      return;
+    }
+
+    console.log(
+      `[WorkflowCoordinator] Executing ${agents.length} agent(s) for gate ${gateType}:`,
+      agents.join(', '),
+    );
+
+    // Get handoff context (shared by all agents)
+    const handoffContext = await this.getHandoffContext(projectId, gateType);
+
+    // Log event for parallel execution start
+    await this.eventStore.appendEvent(projectId, {
+      type: 'ParallelAgentsStarted',
+      data: {
+        gateType,
+        agents,
+        count: agents.length,
+        projectType,
+      },
+      userId,
+    });
+
+    // Check if this is parallel execution
+    const isParallel = isParallelGate(projectType, gateType);
+
+    if (isParallel) {
+      console.log(`[WorkflowCoordinator] Starting PARALLEL execution of ${agents.length} agents`);
+
+      // Execute all agents in parallel
+      const agentPromises = agents.map((agentType) =>
+        this.executeSingleAgent(projectId, agentType, gateType, userId, handoffContext),
+      );
+
+      // Wait for all agents to complete
+      await Promise.all(agentPromises);
+    } else {
+      // Sequential execution (single agent)
+      for (const agentType of agents) {
+        await this.executeSingleAgent(projectId, agentType, gateType, userId, handoffContext);
+      }
+    }
+
+    // After all agents complete, check if gate can transition
+    await this.checkAndTransitionGate(projectId, gateType, userId);
+  }
+
+  /**
+   * Execute a single agent for a gate
+   */
+  private async executeSingleAgent(
+    projectId: string,
+    agentType: string,
+    gateType: string,
+    userId: string,
+    handoffContext: string,
+  ): Promise<void> {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) return;
+
+    // Get task description for this agent at this gate
+    const taskDescription = getAgentTaskDescription(agentType, gateType);
+
+    // Build the agent prompt with handoff context
+    const userPrompt = this.buildAgentPrompt(taskDescription, handoffContext, project);
+
+    console.log(`[WorkflowCoordinator] Starting agent ${agentType} for gate ${gateType}`);
+
+    // Log agent start event
+    await this.eventStore.appendEvent(projectId, {
+      type: 'AgentStarted',
+      data: { agentType, gateType, taskDescription },
+      userId,
+    });
+
+    // Execute the agent with streaming
+    const agentExecutionId = await this.agentExecution.executeAgentStream(
+      {
+        projectId,
+        agentType,
+        userPrompt,
+        model: undefined, // Use template default
+      },
+      userId,
+      {
+        onChunk: (chunk: string) => {
+          this.wsGateway.emitAgentChunk(projectId, agentExecutionId, chunk);
+        },
+        onComplete: async (response) => {
+          this.wsGateway.emitAgentCompleted(projectId, agentExecutionId, {
+            content: response.content,
+            usage: response.usage,
+            finishReason: response.finishReason,
+          });
+
+          // Mark this agent's deliverables complete
+          await this.markAgentDeliverablesComplete(projectId, agentType);
+
+          // Log completion event
+          await this.eventStore.appendEvent(projectId, {
+            type: 'AgentCompleted',
+            data: {
+              agentId: agentExecutionId,
+              agentType,
+              gateType,
+              tokenUsage: response.usage,
+            },
+            userId,
+          });
+
+          console.log(`[WorkflowCoordinator] Agent ${agentType} completed for gate ${gateType}`);
+        },
+        onError: async (error) => {
+          console.error(`[WorkflowCoordinator] Agent ${agentType} error:`, error);
+          this.wsGateway.emitAgentFailed(projectId, agentExecutionId, error.message);
+
+          // Log failure event
+          await this.eventStore.appendEvent(projectId, {
+            type: 'AgentFailed',
+            data: {
+              agentId: agentExecutionId,
+              agentType,
+              gateType,
+              error: error.message,
+            },
+            userId,
+          });
+        },
+      },
+    );
+
+    // Emit agent started event to frontend
+    this.wsGateway.emitAgentStarted(projectId, agentExecutionId, agentType, taskDescription);
+  }
+
+  /**
+   * Build agent prompt with handoff context
+   */
+  private buildAgentPrompt(
+    taskDescription: string,
+    handoffContext: string,
+    project: { name: string; type: string | null },
+  ): string {
+    return `## Project: ${project.name}
+Project Type: ${project.type || 'traditional'}
+
+## Your Task
+${taskDescription}
+
+${handoffContext}
+
+## Instructions
+Complete your assigned task based on the project context and previous agent work.
+Generate all required deliverables and output them in the appropriate format.
+If you need to create documents, use markdown code fences with the document title.`;
+  }
+
+  /**
+   * Get handoff context from previous agents
+   */
+  private async getHandoffContext(projectId: string, currentGateType: string): Promise<string> {
+    // Get recent handoffs
+    const handoffs = await this.prisma.handoff.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      include: { handoffDeliverables: true },
+    });
+
+    // Get recent documents (prioritized by relevance to current gate)
+    const documents = await this.prisma.document.findMany({
+      where: { projectId },
+      orderBy: { updatedAt: 'desc' },
+      take: 10,
+      select: { title: true, content: true, documentType: true },
+    });
+
+    // Get session context if available
+    let sessionData: { recentDecisions?: unknown[]; activeBlockers?: unknown[] } | null = null;
+    try {
+      const allContext = await this.sessionContext.getAllContext(projectId);
+      // Extract decisions and blockers from context
+      const decisions = allContext.filter(
+        (c: { contextType: string }) => c.contextType === 'decision',
+      );
+      const blockers = allContext.filter(
+        (c: { contextType: string }) => c.contextType === 'blocker',
+      );
+      sessionData = {
+        recentDecisions: decisions.slice(0, 5),
+        activeBlockers: blockers,
+      };
+    } catch {
+      // Session context might not exist yet
+    }
+
+    // Build context string
+    let context = '## Project Context\n\n';
+
+    // Add handoffs
+    if (handoffs.length > 0) {
+      context += '### Recent Agent Handoffs\n';
+      for (const h of handoffs) {
+        context += `- **${h.fromAgent} → ${h.toAgent}**: ${h.notes || 'No notes'}\n`;
+        if (h.handoffDeliverables.length > 0) {
+          context += `  Deliverables: ${h.handoffDeliverables.map((d) => d.deliverable).join(', ')}\n`;
+        }
+      }
+      context += '\n';
+    }
+
+    // Add documents (prioritized for current gate)
+    const prioritizedDocs = this.prioritizeDocumentsForGate(documents, currentGateType);
+    if (prioritizedDocs.length > 0) {
+      context += '### Key Documents\n';
+      for (const doc of prioritizedDocs.slice(0, 5)) {
+        context += `#### ${doc.title} (${doc.documentType})\n`;
+        // Truncate to 3000 chars for context window management
+        const truncatedContent = doc.content.substring(0, 3000);
+        context += truncatedContent;
+        if (doc.content.length > 3000) {
+          context += '\n... (truncated)\n';
+        }
+        context += '\n\n';
+      }
+    }
+
+    // Add decisions from session context
+    if (sessionData?.recentDecisions && Array.isArray(sessionData.recentDecisions)) {
+      context += '### Recent Decisions\n';
+      context += JSON.stringify(sessionData.recentDecisions, null, 2) + '\n\n';
+    }
+
+    // Add blockers from session context
+    if (sessionData?.activeBlockers && Array.isArray(sessionData.activeBlockers)) {
+      context += '### Active Blockers\n';
+      context += JSON.stringify(sessionData.activeBlockers, null, 2) + '\n\n';
+    }
+
+    return context;
+  }
+
+  /**
+   * Prioritize documents based on relevance to current gate
+   */
+  private prioritizeDocumentsForGate(
+    documents: { title: string; content: string; documentType: string }[],
+    gateType: string,
+  ): { title: string; content: string; documentType: string }[] {
+    // Define which document types are most relevant for each gate
+    const priorities: Record<string, string[]> = {
+      G2_PENDING: ['REQUIREMENTS'], // PM needs intake
+      G3_PENDING: ['REQUIREMENTS'], // Architect needs PRD
+      G4_PENDING: ['ARCHITECTURE', 'REQUIREMENTS'], // Designer needs arch + PRD
+      G5_PENDING: ['ARCHITECTURE', 'API_SPEC', 'DATABASE_SCHEMA', 'DESIGN'], // Devs need specs
+      G6_PENDING: ['CODE', 'API_SPEC', 'REQUIREMENTS'], // QA needs code + specs
+      G7_PENDING: ['CODE', 'ARCHITECTURE'], // Security needs code + arch
+      G8_PENDING: ['DEPLOYMENT_GUIDE', 'ARCHITECTURE'], // DevOps needs deploy guide
+      G9_PENDING: ['DEPLOYMENT_GUIDE', 'TEST_RESULTS'], // Production deployment
+    };
+
+    const priorityTypes = priorities[gateType] || [];
+
+    return [...documents].sort((a, b) => {
+      const aIndex = priorityTypes.indexOf(a.documentType);
+      const bIndex = priorityTypes.indexOf(b.documentType);
+      if (aIndex === -1 && bIndex === -1) return 0;
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    });
+  }
+
+  /**
+   * Mark deliverables complete for an agent
+   */
+  private async markAgentDeliverablesComplete(projectId: string, agentType: string): Promise<void> {
+    const result = await this.prisma.deliverable.updateMany({
+      where: {
+        projectId,
+        owner: agentType,
+        status: { not: 'complete' },
+      },
+      data: {
+        status: 'complete',
+      },
+    });
+
+    if (result.count > 0) {
+      console.log(
+        `[WorkflowCoordinator] Marked ${result.count} deliverable(s) complete for ${agentType}`,
+      );
+
+      // Log event
+      await this.eventStore.appendEvent(projectId, {
+        type: 'DeliverablesCompleted',
+        data: { agentType, count: result.count },
+      });
+    }
+  }
+
+  /**
+   * Check if all deliverables are complete and transition gate to review
+   */
+  private async checkAndTransitionGate(
+    projectId: string,
+    gateType: string,
+    userId: string,
+  ): Promise<void> {
+    // Get all deliverables for this project
+    const deliverables = await this.prisma.deliverable.findMany({
+      where: { projectId },
+    });
+
+    const incompleteCount = deliverables.filter((d) => d.status !== 'complete').length;
+    const totalCount = deliverables.length;
+
+    console.log(
+      `[WorkflowCoordinator] Gate ${gateType}: ${totalCount - incompleteCount}/${totalCount} deliverables complete`,
+    );
+
+    if (incompleteCount === 0 && totalCount > 0) {
+      // All deliverables complete - transition to review
+      console.log(
+        `[WorkflowCoordinator] All deliverables complete, transitioning ${gateType} to review`,
+      );
+
+      await this.gateStateMachine.transitionToReview(projectId, gateType, {
+        description: `${gateType} ready for approval - all ${totalCount} deliverables complete`,
+      });
+
+      // Get the gate ID for proper frontend notification
+      const gate = await this.prisma.gate.findFirst({
+        where: { projectId, gateType },
+        select: { id: true },
+      });
+
+      // Log event
+      await this.eventStore.appendEvent(projectId, {
+        type: 'GateReadyForReview',
+        data: { gateType, gateId: gate?.id, deliverableCount: totalCount },
+        userId,
+      });
+
+      // Notify frontend via gate ready event (for UI gate approval panel)
+      this.wsGateway.emitGateReady(projectId, gate?.id || '', gateType, [
+        {
+          type: 'deliverables_complete',
+          message: `${gateType} is ready for your review and approval.`,
+          count: totalCount,
+        },
+      ]);
+
+      // Also send a chat message for gate-ready notification
+      const gateNumber = this.extractGateNumber(gateType);
+      const chatMessage = this.getGateReadyMessage(gateNumber, gateType);
+      const eventId = `g${gateNumber}-ready`;
+
+      this.wsGateway.emitAgentChunk(projectId, eventId, chatMessage);
+      this.wsGateway.emitAgentCompleted(projectId, eventId, {
+        content: chatMessage,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: 'end_turn',
+      });
+    }
+  }
+
+  /**
+   * Create a git checkpoint commit after gate approval
+   * This ensures all work is committed and tagged for recovery
+   */
+  private async createGitCheckpoint(
+    projectId: string,
+    gateType: string,
+    userId: string,
+  ): Promise<void> {
+    try {
+      // Get project workspace path
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { name: true },
+      });
+
+      if (!project) {
+        console.log(`[GitCheckpoint] Project not found: ${projectId}`);
+        return;
+      }
+
+      // Check if there are uncommitted files
+      const uncommittedFiles = await this.gitIntegration.getUncommittedFiles(projectId);
+
+      if (uncommittedFiles.length === 0) {
+        console.log(`[GitCheckpoint] No uncommitted files for ${gateType}`);
+        return;
+      }
+
+      console.log(
+        `[GitCheckpoint] Creating checkpoint for ${gateType} with ${uncommittedFiles.length} files`,
+      );
+
+      // Create the checkpoint commit
+      const gateNumber = this.extractGateNumber(gateType);
+      const commitMessage = `Gate ${gateType} approved - Checkpoint commit
+
+Project: ${project.name}
+Gate: G${gateNumber} (${this.getGateName(gateNumber)})
+Files: ${uncommittedFiles.length} files committed
+Approved by: User
+
+This is an automatic checkpoint commit created after gate approval.`;
+
+      const commitResult = await this.gitIntegration.commitAll(projectId, commitMessage, {
+        name: 'FuzzyLlama System',
+        email: 'system@fuzzyllama.ai',
+      });
+
+      if (commitResult.success) {
+        console.log(`[GitCheckpoint] Checkpoint created: ${commitResult.commitHash}`);
+
+        // Log event to trust store
+        await this.eventStore.appendEvent(projectId, {
+          type: 'GitCheckpointCreated',
+          data: {
+            gateType,
+            commitHash: commitResult.commitHash,
+            filesCommitted: uncommittedFiles.length,
+            message: commitMessage,
+          },
+          userId,
+        });
+
+        // Notify frontend about the checkpoint via agent message
+        const checkpointMessage = `**Git Checkpoint Created**\nCommit: \`${commitResult.commitHash?.substring(0, 8)}\`\nFiles: ${uncommittedFiles.length} committed`;
+        this.wsGateway.emitAgentChunk(projectId, `git-checkpoint-${gateType}`, checkpointMessage);
+        this.wsGateway.emitAgentCompleted(projectId, `git-checkpoint-${gateType}`, {
+          content: checkpointMessage,
+          usage: { inputTokens: 0, outputTokens: 0 },
+          finishReason: 'end_turn',
+        });
+      } else {
+        console.error(`[GitCheckpoint] Failed to create checkpoint: ${commitResult.error}`);
+
+        // Log failure event
+        await this.eventStore.appendEvent(projectId, {
+          type: 'GitCheckpointFailed',
+          data: {
+            gateType,
+            error: commitResult.error,
+          },
+          userId,
+        });
+      }
+    } catch (error) {
+      console.error(`[GitCheckpoint] Error creating checkpoint for ${gateType}:`, error);
+
+      // Log error event but don't fail the gate approval
+      await this.eventStore.appendEvent(projectId, {
+        type: 'GitCheckpointFailed',
+        data: {
+          gateType,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        userId,
+      });
+    }
+  }
+
+  /**
+   * Get human-readable gate name
+   */
+  private getGateName(gateNumber: number): string {
+    const gateNames: Record<number, string> = {
+      1: 'Scope Approval',
+      2: 'PRD Approval',
+      3: 'Architecture Approval',
+      4: 'Design Approval',
+      5: 'Development Complete',
+      6: 'Testing Complete',
+      7: 'Security Audit',
+      8: 'Staging Deployment',
+      9: 'Production Deployment',
+    };
+    return gateNames[gateNumber] || `Gate ${gateNumber}`;
+  }
+
+  /**
+   * Get gate-ready message for chat display
+   */
+  private getGateReadyMessage(gateNumber: number, gateType: string): string {
+    const messages: Record<number, string> = {
+      2: `## PRD Ready for Review
+
+Your **Product Requirements Document** is now available in the Docs tab.
+
+Please review the PRD and type **"approve"** to proceed to G3 (Architecture), or let me know if you'd like any changes.`,
+
+      3: `## Architecture Ready for Review
+
+Your **System Architecture** documents are now available in the Docs tab, including:
+- API Specification (OpenAPI)
+- Database Schema (Prisma)
+- Architecture Documentation
+
+Please review and type **"approve"** to proceed to G4 (Design), or let me know if you'd like any changes.`,
+
+      4: `## Design Ready for Review
+
+Your **Design System** and **UI Mockups** are now available in the Docs tab.
+
+Please review and type **"approve"** to proceed to G5 (Development), or let me know if you'd like any changes.`,
+
+      5: `## Development Complete - Ready for Review
+
+Your **Frontend** and **Backend** implementations are complete. Code and documentation are available in the Docs tab.
+
+Please review and type **"approve"** to proceed to G6 (Testing), or let me know if you'd like any changes.`,
+
+      6: `## Testing Complete - Ready for Review
+
+Your **Test Results** and **Coverage Reports** are available in the Docs tab.
+
+Please review and type **"approve"** to proceed to G7 (Security Audit), or let me know if you'd like any changes.`,
+
+      7: `## Security Audit Complete - Ready for Review
+
+Your **Security Audit Report** is available in the Docs tab.
+
+Please review and type **"approve"** to proceed to G8 (Staging Deployment), or let me know if you'd like any changes.`,
+
+      8: `## Staging Deployment Complete - Ready for Review
+
+Your application has been **deployed to staging**. Deployment details are available in the Docs tab.
+
+Please review the staging environment and type **"approve"** to proceed to G9 (Production Deployment), or let me know if you'd like any changes.`,
+
+      9: `## Production Deployment Ready for Review
+
+Your application is ready for **production deployment**.
+
+Please review the deployment plan and type **"approve"** to complete the project, or let me know if you'd like any changes.`,
+    };
+
+    return (
+      messages[gateNumber] ||
+      `## ${gateType} Ready for Review
+
+All deliverables are complete. Please review and type **"approve"** to proceed.`
+    );
   }
 }

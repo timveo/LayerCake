@@ -72,6 +72,7 @@ const transformMessageForDisplay = (msg: ChatMessage): ChatMessage => {
 };
 
 // Background agents that produce documents (don't show streaming in chat)
+// All 14 agents except PM_ONBOARDING which has conversation
 const BACKGROUND_AGENTS = [
   'PRODUCT_MANAGER',
   'ARCHITECT',
@@ -81,10 +82,14 @@ const BACKGROUND_AGENTS = [
   'DATABASE_SPECIALIST',
   'DEVOPS_ENGINEER',
   'QA_ENGINEER',
+  'SECURITY_ENGINEER',
   'SECURITY_SPECIALIST',
   'TECHNICAL_WRITER',
   'ML_ENGINEER',
   'DATA_ENGINEER',
+  'PROMPT_ENGINEER',
+  'MODEL_EVALUATOR',
+  'AIOPS_ENGINEER',
   'ORCHESTRATOR',
 ];
 
@@ -96,17 +101,21 @@ const isBackgroundAgent = (agentType: string): boolean => {
 const getBackgroundAgentMessage = (agentType: string): string => {
   const messages: Record<string, string> = {
     'PRODUCT_MANAGER': 'Creating your Product Requirements Document...',
-    'ARCHITECT': 'Designing the system architecture...',
-    'UX_UI_DESIGNER': 'Creating design mockups...',
-    'FRONTEND_DEVELOPER': 'Building the frontend...',
-    'BACKEND_DEVELOPER': 'Building the backend...',
+    'ARCHITECT': 'Designing the system architecture and generating specs...',
+    'UX_UI_DESIGNER': 'Creating design mockups and design system...',
+    'FRONTEND_DEVELOPER': 'Building the frontend from specs...',
+    'BACKEND_DEVELOPER': 'Building the backend API from specs...',
     'DATABASE_SPECIALIST': 'Designing the database schema...',
-    'DEVOPS_ENGINEER': 'Setting up infrastructure...',
-    'QA_ENGINEER': 'Creating test plans...',
+    'DEVOPS_ENGINEER': 'Setting up CI/CD and infrastructure...',
+    'QA_ENGINEER': 'Creating test plans and running tests...',
+    'SECURITY_ENGINEER': 'Performing OWASP security audit...',
     'SECURITY_SPECIALIST': 'Performing security analysis...',
     'TECHNICAL_WRITER': 'Writing documentation...',
-    'ML_ENGINEER': 'Building ML components...',
-    'DATA_ENGINEER': 'Setting up data pipelines...',
+    'ML_ENGINEER': 'Training and optimizing ML models...',
+    'DATA_ENGINEER': 'Building data pipelines and feature store...',
+    'PROMPT_ENGINEER': 'Designing and testing prompts for LLM integrations...',
+    'MODEL_EVALUATOR': 'Evaluating model performance and benchmarks...',
+    'AIOPS_ENGINEER': 'Setting up MLOps pipeline and model serving...',
     'ORCHESTRATOR': 'Coordinating project workflow...',
   };
   return messages[agentType] || 'Working on your project...';
@@ -157,12 +166,35 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     setMessages([systemMessage]);
   }, [projectId, isNewProject]);
 
-  // Listen for special agent events (onboarding-complete, g1-approved, guidance)
+  // Listen for special agent events (onboarding-complete, gate approvals, guidance, gate-ready, etc.)
   useEffect(() => {
     if (!agentEvents || agentEvents.length === 0) return;
 
     // Special event IDs that send messages directly from the backend
-    const specialEventIds = ['onboarding-complete', 'g1-approved', 'guidance'];
+    // These include gate-ready events and gate-approved events for all gates
+    const specialEventIds = [
+      'onboarding-complete',
+      'guidance',
+      // Gate approval confirmations (G1-G9)
+      'g1-approved',
+      'g2-approved',
+      'g3-approved',
+      'g4-approved',
+      'g5-approved',
+      'g6-approved',
+      'g7-approved',
+      'g8-approved',
+      'g9-approved',
+      // Gate ready for review notifications (G2-G9)
+      'g2-ready',
+      'g3-ready',
+      'g4-ready',
+      'g5-ready',
+      'g6-ready',
+      'g7-ready',
+      'g8-ready',
+      'g9-ready',
+    ];
 
     for (const eventId of specialEventIds) {
       const event = agentEvents.find(

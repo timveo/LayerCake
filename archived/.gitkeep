@@ -1,0 +1,16 @@
+# Archived Projects Directory
+
+This directory contains completed or archived projects.
+
+Projects are moved here when:
+- Development is complete
+- Project is in maintenance mode
+- Project is no longer actively developed
+
+Each archived project includes:
+- Complete source code
+- Full documentation
+- Archive summary document
+- Final metrics and performance data
+
+See `../PROJECT_MANAGEMENT.md` for archiving process.

@@ -6,7 +6,7 @@ An AI-powered application that helps users plan, design, develop, and deploy pro
 
 FuzzyLlama orchestrates specialized AI agents to guide users through the complete software development lifecycle—from initial concept to production deployment. It provides human oversight at critical decision points while automating the heavy lifting of professional software development.
 
-> **Note:** FuzzyLlama is derived from the [Multi-Agent-Product-Creator](https://github.com/your-org/Multi-Agent-Product-Creator) framework. All capabilities from that agent framework are being built into FuzzyLlama as product features with a full web UI.
+> **Note:** FuzzyLlama is derived from the [Multi-Agent-Product-Creator](https://github.com/your-org/Multi-Agent-Product-Creator) framework. All capabilities from that agent framework are built into FuzzyLlama as product features with a full web UI.
 
 ### What It Does
 
@@ -28,7 +28,7 @@ FuzzyLlama orchestrates specialized AI agents to guide users through the complet
 - **DevOps Engineer** - Infrastructure and CI/CD
 - Plus ML-specific agents for AI/ML projects
 
-### Approval Gates
+### Approval Gates (G1-G9)
 9 human checkpoints ensure quality and alignment:
 
 | Gate | When | Decision |
@@ -43,10 +43,10 @@ FuzzyLlama orchestrates specialized AI agents to guide users through the complet
 | **G8** | Pre-deployment | Go/no-go |
 | **G9** | Post-deployment | Production acceptance |
 
-### Project Workflows
-- **Greenfield** - New projects from scratch
-- **Enhancement** - Adding features to existing codebases
-- **AI-Generated** - Projects with AI/ML components
+### Project Types
+- **Traditional** - Standard web applications
+- **AI/ML** - Projects with ML models and data pipelines
+- **Hybrid** - Combined traditional + AI components
 
 ## Tech Stack
 
@@ -62,17 +62,19 @@ FuzzyLlama orchestrates specialized AI agents to guide users through the complet
 
 ```
 FuzzyLlama/
-├── backend/          # NestJS API server (17 modules)
-├── frontend/         # React web application
+├── backend/          # NestJS API server (17+ modules)
+├── frontend/         # React 19 web application
 ├── mcp-server/       # MCP state management server
-├── agents/           # Agent prompt templates (from framework)
-├── constants/        # Protocols and definitions (from framework)
+├── agents/           # Agent prompt templates (reference)
+├── constants/        # Protocols and definitions (reference)
 ├── templates/        # Project starter templates
+├── docs/             # Documentation
 ├── docker/           # Docker configuration
-└── docs/             # Documentation
+├── scripts/          # Utility scripts
+└── schemas/          # JSON schemas
 ```
 
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 - Node.js 20+
@@ -87,24 +89,15 @@ FuzzyLlama/
 git clone https://github.com/your-org/FuzzyLlama.git
 cd FuzzyLlama
 
-# Install dependencies
-cd backend && npm install
-cd ../frontend && npm install
-cd ../mcp-server && npm install
+# Use the automated start script
+./start-local.sh
 
-# Set up environment
-cp .env.example .env
-# Edit .env with your configuration
-
-# Start database
-docker compose up -d postgres redis
-
-# Run migrations
-cd backend && npx prisma migrate dev
-
-# Start development servers
-npm run dev  # In each directory
+# Or manually:
+cd backend && npm install && npm run start:dev
+cd ../frontend && npm install && npm run dev
 ```
+
+See [SETUP.md](SETUP.md) for detailed setup instructions.
 
 ### Docker Setup
 
@@ -116,33 +109,30 @@ docker compose up -d
 docker compose logs -f
 ```
 
-## Framework Reference
+## Documentation
 
+### Core Documentation
+- [Setup Guide](SETUP.md) - Local development setup
+- [Architecture](docs/ARCHITECTURE.md) - System architecture
+- [Workflows](docs/WORKFLOWS.md) - Complete workflow specifications
+- [Gate Enforcement](docs/GATE_ENFORCEMENT.md) - Approval gate implementation
+
+### Deployment
+- [Local Development](docs/LOCAL_DEVELOPMENT.md) - Running locally
+- [Production Deployment](docs/PRODUCTION_DEPLOYMENT.md) - Production setup
+
+### Reference Material
 The `agents/` and `constants/` directories contain reference material from the Multi-Agent-Product-Creator framework:
-
-### Agents (`agents/`)
-14 agent prompt templates defining each agent's role, capabilities, and outputs.
-
-### Constants (`constants/`)
 
 | Directory | Purpose |
 |-----------|---------|
-| `core/` | Fundamental definitions (phases, states, enums) |
-| `protocols/` | Operational protocols (startup, handoffs, approvals) |
-| `advanced/` | Complex orchestration (parallel work, task queues) |
-| `reference/` | Supporting documentation |
+| `agents/` | 14 agent prompt templates |
+| `constants/core/` | Fundamental definitions (phases, states, enums) |
+| `constants/protocols/` | Operational protocols (handoffs, approvals) |
+| `constants/advanced/` | Complex orchestration (parallel work, task queues) |
 
-Key files:
-- `constants/core/CONSTANTS.md` - Single source of truth for enums
-- `constants/core/AGENT_INDEX.md` - Agent capabilities matrix
-- `constants/protocols/APPROVAL_GATES.md` - Gate definitions
-- `constants/protocols/PROTOCOLS.md` - Communication protocols
-
-## Documentation
-
-- [Architecture](docs/ARCHITECTURE.md)
-- [Workflows](docs/WORKFLOWS.md)
-- [API Documentation](http://localhost:3000/api/docs) (when running)
+### API Documentation
+When running locally: http://localhost:3000/api/docs
 
 ## Quality Targets
 

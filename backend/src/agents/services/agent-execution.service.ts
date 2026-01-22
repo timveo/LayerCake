@@ -3,11 +3,13 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { TaskStatus } from '@prisma/client';
+import { TaskStatus, TeachingLevel } from '@prisma/client';
 import { AgentTemplateLoaderService } from './agent-template-loader.service';
 import { AIProviderService, AIProviderStreamCallback } from './ai-provider.service';
+import { ToolEnabledAIProviderService } from './tool-enabled-ai-provider.service';
 import {
   AgentExecutionContext,
   AgentExecutionResult,
@@ -19,18 +21,58 @@ import { CodeParserService } from '../../code-generation/code-parser.service';
 import { FileSystemService } from '../../code-generation/filesystem.service';
 import { BuildExecutorService } from '../../code-generation/build-executor.service';
 import { AgentRetryService } from './agent-retry.service';
+import { CostTrackingService } from '../../cost-tracking/cost-tracking.service';
+import { AgentMemoryService } from '../../agent-memory/agent-memory.service';
+
+/**
+ * Teaching level instructions for Phase 5
+ * Agents adapt their communication style based on user's technical background
+ */
+const TEACHING_LEVEL_INSTRUCTIONS: Record<TeachingLevel, string> = {
+  NOVICE: `
+## Communication Style: NOVICE User
+- Use simple, non-technical language
+- Explain concepts as if teaching a beginner
+- Avoid jargon; when technical terms are necessary, define them
+- Use analogies and real-world examples
+- Be encouraging and patient
+- Break down complex ideas into small steps
+- Offer to explain more if something might be confusing`,
+
+  INTERMEDIATE: `
+## Communication Style: INTERMEDIATE User
+- Balance clarity with technical accuracy
+- Use common technical terms without over-explaining basics
+- Offer brief explanations for advanced concepts
+- Provide options when multiple approaches exist
+- Focus on the "why" behind decisions`,
+
+  EXPERT: `
+## Communication Style: EXPERT User
+- Be concise and direct
+- Use precise technical terminology
+- Skip basic explanations
+- Focus on implementation details and trade-offs
+- Assume familiarity with frameworks and patterns
+- Highlight edge cases and performance considerations`,
+};
 
 @Injectable()
 export class AgentExecutionService {
+  private readonly logger = new Logger(AgentExecutionService.name);
+
   constructor(
     private prisma: PrismaService,
     private templateLoader: AgentTemplateLoaderService,
     private aiProvider: AIProviderService,
+    private toolEnabledProvider: ToolEnabledAIProviderService,
     private documentsService: DocumentsService,
     private codeParser: CodeParserService,
     private filesystem: FileSystemService,
     private buildExecutor: BuildExecutorService,
     private retryService: AgentRetryService,
+    private costTracking: CostTrackingService,
+    private agentMemory: AgentMemoryService,
   ) {}
 
   async executeAgent(executeDto: ExecuteAgentDto, userId: string): Promise<AgentExecutionResult> {
@@ -184,10 +226,10 @@ export class AgentExecutionService {
       throw new ForbiddenException('You can only execute agents for your own projects');
     }
 
-    // Check monthly execution limit
+    // Check monthly execution limit and get teaching level
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { planTier: true, monthlyAgentExecutions: true },
+      select: { planTier: true, monthlyAgentExecutions: true, teachingLevel: true },
     });
 
     const limits = {
@@ -206,6 +248,9 @@ export class AgentExecutionService {
       streamCallback.onError(error);
       throw error;
     }
+
+    // Phase 5: Get user's teaching level for adapted communication
+    const teachingLevel = user.teachingLevel || TeachingLevel.INTERMEDIATE;
 
     // Get agent template from our new system
     const template = getAgentTemplate(executeDto.agentType);
@@ -247,8 +292,57 @@ export class AgentExecutionService {
       },
     });
 
-    // Build system prompt from template
-    const systemPrompt = this.buildSystemPromptFromNewTemplate(template, context);
+    // Build system prompt from template with teaching level adaptation (Phase 5)
+    const systemPrompt = this.buildSystemPromptFromNewTemplate(template, context, teachingLevel);
+
+    // Determine if this agent should use tool-enabled execution
+    // Agents that benefit from MCP tools: ARCHITECT (spec registration), PRODUCT_MANAGER (decisions)
+    const toolEnabledAgents = [
+      'ARCHITECT',
+      'PRODUCT_MANAGER',
+      'FRONTEND_DEVELOPER',
+      'BACKEND_DEVELOPER',
+      'QA_ENGINEER',
+      'SECURITY_ENGINEER',
+    ];
+    const useToolEnabled = toolEnabledAgents.includes(executeDto.agentType);
+
+    if (useToolEnabled) {
+      // Use tool-enabled execution (Phase 1-4, 6)
+      this.logger.log(`[${executeDto.agentType}] Using tool-enabled execution`);
+      this.toolEnabledProvider
+        .executeWithToolsStream(
+          systemPrompt,
+          executeDto.userPrompt,
+          executeDto.projectId,
+          executeDto.agentType,
+          {
+            onChunk: (chunk: string) => {
+              streamCallback.onChunk(chunk);
+            },
+            onComplete: async (response) => {
+              await this.handleAgentCompletion(
+                executionId,
+                executeDto,
+                template,
+                context,
+                systemPrompt,
+                response,
+                streamCallback,
+                userId,
+              );
+            },
+            onError: async (error) => {
+              await this.handleAgentError(executionId, error, streamCallback);
+            },
+          },
+          executeDto.model || template.defaultModel,
+          template.maxTokens || 8000,
+        )
+        .catch((error) => this.handleAgentError(executionId, error, streamCallback));
+
+      return executionId;
+    }
 
     // Execute AI prompt with streaming (fire-and-forget, don't await)
     // This allows us to return the execution ID immediately while streaming continues
@@ -273,6 +367,59 @@ export class AgentExecutionService {
                 completedAt: new Date(),
               },
             });
+
+            // Track cost and update COST_LOG document
+            try {
+              const currentGate = context.currentGate || 'G1_PENDING';
+              const model = executeDto.model || template.defaultModel;
+              const costResult = await this.costTracking.logAgentCost(
+                executeDto.projectId,
+                executeDto.agentType,
+                currentGate,
+                model,
+                response.usage.inputTokens,
+                response.usage.outputTokens,
+              );
+              console.log(
+                `[CostTracking] ${executeDto.agentType} cost: $${costResult.cost.toFixed(4)}, total: $${costResult.totalProjectCost.toFixed(4)}`,
+              );
+            } catch (error) {
+              console.error('Cost tracking error:', error);
+              // Don't fail execution if cost tracking fails
+            }
+
+            // Update Agent Log document
+            try {
+              await this.updateAgentLogDocument(
+                executeDto.projectId,
+                executeDto.agentType,
+                context.currentGate || 'G1_PENDING',
+                'Complete',
+              );
+            } catch (error) {
+              console.error('Agent log update error:', error);
+            }
+
+            // Save full agent memory for context recovery
+            try {
+              await this.agentMemory.saveAgentMemory({
+                projectId: executeDto.projectId,
+                agentId: executionId,
+                agentType: executeDto.agentType,
+                gateType: context.currentGate || 'G1_PENDING',
+                systemPrompt: systemPrompt,
+                userPrompt: executeDto.userPrompt,
+                response: response.content,
+                documentsUsed: context.availableDocuments || [],
+                model: executeDto.model || template.defaultModel,
+                inputTokens: response.usage.inputTokens,
+                outputTokens: response.usage.outputTokens,
+              });
+              console.log(`[AgentMemory] Saved memory for ${executeDto.agentType}`);
+            } catch (error) {
+              console.error('Agent memory save error:', error);
+              // Don't fail execution if memory save fails
+            }
 
             // Post-processing: Generate documents and handle handoffs
             try {
@@ -316,7 +463,134 @@ export class AgentExecutionService {
     return executionId;
   }
 
-  private buildSystemPromptFromNewTemplate(template: any, context: AgentExecutionContext): string {
+  /**
+   * Handle successful agent completion (shared by both standard and tool-enabled execution)
+   */
+  private async handleAgentCompletion(
+    executionId: string,
+    executeDto: ExecuteAgentDto,
+    template: any,
+    context: AgentExecutionContext,
+    systemPrompt: string,
+    response: {
+      content: string;
+      model: string;
+      usage: { inputTokens: number; outputTokens: number };
+      finishReason: string;
+    },
+    streamCallback: AIProviderStreamCallback,
+    userId: string,
+  ): Promise<void> {
+    // Update agent execution record
+    await this.prisma.agent.update({
+      where: { id: executionId },
+      data: {
+        status: 'COMPLETED',
+        outputResult: response.content,
+        inputTokens: response.usage.inputTokens,
+        outputTokens: response.usage.outputTokens,
+        completedAt: new Date(),
+      },
+    });
+
+    // Track cost and update COST_LOG document
+    try {
+      const currentGate = context.currentGate || 'G1_PENDING';
+      const model = executeDto.model || template.defaultModel;
+      const costResult = await this.costTracking.logAgentCost(
+        executeDto.projectId,
+        executeDto.agentType,
+        currentGate,
+        model,
+        response.usage.inputTokens,
+        response.usage.outputTokens,
+      );
+      this.logger.log(
+        `[CostTracking] ${executeDto.agentType} cost: $${costResult.cost.toFixed(4)}, total: $${costResult.totalProjectCost.toFixed(4)}`,
+      );
+    } catch (error) {
+      this.logger.error('Cost tracking error:', error);
+    }
+
+    // Update Agent Log document
+    try {
+      await this.updateAgentLogDocument(
+        executeDto.projectId,
+        executeDto.agentType,
+        context.currentGate || 'G1_PENDING',
+        'Complete',
+      );
+    } catch (error) {
+      this.logger.error('Agent log update error:', error);
+    }
+
+    // Save full agent memory for context recovery
+    try {
+      await this.agentMemory.saveAgentMemory({
+        projectId: executeDto.projectId,
+        agentId: executionId,
+        agentType: executeDto.agentType,
+        gateType: context.currentGate || 'G1_PENDING',
+        systemPrompt: systemPrompt,
+        userPrompt: executeDto.userPrompt,
+        response: response.content,
+        documentsUsed: context.availableDocuments || [],
+        model: executeDto.model || template.defaultModel,
+        inputTokens: response.usage.inputTokens,
+        outputTokens: response.usage.outputTokens,
+      });
+      this.logger.log(`[AgentMemory] Saved memory for ${executeDto.agentType}`);
+    } catch (error) {
+      this.logger.error('Agent memory save error:', error);
+    }
+
+    // Post-processing: Generate documents and handle handoffs
+    try {
+      await this.postProcessAgentCompletion(
+        executionId,
+        executeDto.projectId,
+        executeDto.agentType,
+        response.content,
+        userId,
+      );
+    } catch (error) {
+      this.logger.error('Post-processing error:', error);
+    }
+
+    streamCallback.onComplete(response);
+  }
+
+  /**
+   * Handle agent execution error (shared by both standard and tool-enabled execution)
+   */
+  private async handleAgentError(
+    executionId: string,
+    error: Error,
+    streamCallback: AIProviderStreamCallback,
+  ): Promise<void> {
+    this.logger.error(`Agent execution error: ${error.message}`);
+
+    // Update agent execution with error
+    await this.prisma.agent.update({
+      where: { id: executionId },
+      data: {
+        status: 'FAILED',
+        outputResult: error.message,
+        completedAt: new Date(),
+      },
+    });
+
+    streamCallback.onError(error);
+  }
+
+  private buildSystemPromptFromNewTemplate(
+    template: any,
+    context: AgentExecutionContext,
+    teachingLevel?: TeachingLevel,
+  ): string {
+    // Phase 5: Add teaching level instructions if available
+    const teachingInstructions = teachingLevel ? TEACHING_LEVEL_INSTRUCTIONS[teachingLevel] : '';
+
     return `${template.systemPrompt}
 
 ## Current Project Context
@@ -325,6 +599,18 @@ export class AgentExecutionService {
 - **Current Phase**: ${context.currentPhase}
 - **Current Gate**: ${context.currentGate}
 - **Available Documents**: ${context.availableDocuments.join(', ') || 'None'}
+${teachingInstructions}
+
+## MCP Tools Available
+
+You have access to the following tools during execution. Use them to:
+- **get_context_for_story**: Fetch relevant context on demand (more efficient than pre-loaded context)
+- **register_spec**: Explicitly register specs (OpenAPI, Prisma, Zod) - preferred over markdown output
+- **check_spec_integrity**: Validate specs align before development starts
+- **create_query**: Ask questions to other agents when you need clarification
+- **record_decision**: Log important decisions with rationale
+- **get_documents**: Fetch specific documents by type
+- **record_handoff**: Document handoff to the next agent
 
 ---
 
@@ -698,6 +984,26 @@ ${template.prompt.context}
     } catch (error) {
       console.error('Task update error:', error);
     }
+
+    // 5. Mark agent's deliverables as complete
+    try {
+      const result = await this.prisma.deliverable.updateMany({
+        where: {
+          projectId,
+          owner: agentType,
+          status: { not: 'complete' },
+        },
+        data: {
+          status: 'complete',
+        },
+      });
+
+      if (result.count > 0) {
+        console.log(`[${agentType}] Marked ${result.count} deliverable(s) as complete`);
+      }
+    } catch (error) {
+      console.error('Deliverable update error:', error);
+    }
   }
 
   /**
@@ -712,5 +1018,84 @@ ${template.prompt.context}
     });
 
     return gate?.id || null;
+  }
+
+  /**
+   * Update the Agent Log document with a new execution entry
+   */
+  private async updateAgentLogDocument(
+    projectId: string,
+    agentType: string,
+    gateType: string,
+    outcome: string,
+  ): Promise<void> {
+    // Find the Agent Log document
+    const agentLogDoc = await this.prisma.document.findFirst({
+      where: {
+        projectId,
+        title: 'Agent Log',
+      },
+    });
+
+    if (!agentLogDoc) {
+      console.log('[AgentLog] Agent Log document not found for project:', projectId);
+      return;
+    }
+
+    // Format agent name for display
+    const agentDisplay = agentType
+      .split('-')
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+
+    // Get current timestamp
+    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 16);
+
+    // Build new table row
+    const newRow = `| ${timestamp} | ${gateType} | ${agentDisplay} | Agent execution | - | ${outcome} |`;
+
+    // Parse current content and insert new row
+    let content = agentLogDoc.content;
+
+    // Find the "Agent Executions" table and add the new row
+    const tableMatch = content.match(
+      /## Agent Executions\s*\n\n\| Timestamp \| Gate \| Agent \| Task \| Duration \| Outcome \|\n\|[-|\s]+\|\n([\s\S]*?)\n\n---/,
+    );
+
+    if (tableMatch) {
+      const existingRows = tableMatch[1].trim();
+      let newTableContent: string;
+
+      // Check if it's just the placeholder row
+      if (existingRows.includes('| Started') && existingRows.split('\n').length === 1) {
+        // Replace placeholder with actual data
+        newTableContent = newRow;
+      } else {
+        // Append new row
+        newTableContent = existingRows + '\n' + newRow;
+      }
+
+      content = content.replace(
+        /## Agent Executions\s*\n\n\| Timestamp \| Gate \| Agent \| Task \| Duration \| Outcome \|\n\|[-|\s]+\|\n[\s\S]*?\n\n---/,
+        `## Agent Executions
+
+| Timestamp | Gate | Agent | Task | Duration | Outcome |
+|-----------|------|-------|------|----------|---------|
+${newTableContent}
+
+---`,
+      );
+    }
+
+    // Update the document
+    await this.prisma.document.update({
+      where: { id: agentLogDoc.id },
+      data: {
+        content,
+        updatedAt: new Date(),
+      },
+    });
+
+    console.log(`[AgentLog] Updated Agent Log: ${agentDisplay} at ${gateType} - ${outcome}`);
   }
 }

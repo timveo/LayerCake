@@ -1112,6 +1112,43 @@ enum AgentStatus {
   CANCELLED
 }
 
+// Agent Memory - Full transcript persistence for context recovery
+// This survives context compaction and allows querying what any agent saw/produced
+model AgentMemory {
+  id          String   @id @default(cuid())
+  projectId   String
+  agentId     String   // Reference to Agent execution
+  agentType   String   // Denormalized for querying
+  gateType    String   // Gate during which agent ran
+
+  // Full prompts (what the agent saw)
+  systemPrompt  String   @db.Text  // The agent's system prompt/template
+  userPrompt    String   @db.Text  // The constructed user prompt
+
+  // Full response (what the agent produced)
+  response      String   @db.Text  // Complete agent response
+
+  // Context fed to agent
+  documentsUsed String[] // Document IDs/titles that were in context
+  handoffContext String? @db.Text // Handoff data from previous agent
+
+  // Metadata
+  model         String   // AI model used
+  inputTokens   Int      @default(0)
+  outputTokens  Int      @default(0)
+  durationMs    Int?     // Execution duration in milliseconds
+
+  // Searchable summary (for quick lookups)
+  summary       String?  @db.Text  // LLM-generated summary of what happened
+
+  createdAt     DateTime @default(now())
+
+  @@index([projectId])
+  @@index([agentType])
+  @@index([gateType])
+  @@index([agentId])
+}
+
 model Document {
   id           String   @id @default(cuid())
   projectId    String

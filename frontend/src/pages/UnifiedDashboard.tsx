@@ -650,14 +650,14 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
 
   // Get the design document (usually "UX/UI Design System")
   const designDoc = designDocuments?.[0];
+  const designContent = designDoc?.content;
 
   // Parse design options from the document content
   // The UX/UI Designer creates multiple design options as HTML blocks
   const designOptions = useMemo(() => {
-    if (!designDoc?.content) return [];
+    if (!designContent) return [];
 
     const options: Array<{ name: string; html: string }> = [];
-    const content = designDoc.content;
 
     // Look for HTML blocks in the content - try multiple patterns
     // Pattern 1: ```html blocks with Option headers
@@ -665,7 +665,7 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
     let match;
     let optionNum = 1;
 
-    while ((match = htmlBlockRegex.exec(content)) !== null) {
+    while ((match = htmlBlockRegex.exec(designContent)) !== null) {
       const num = match[1] || optionNum;
       options.push({
         name: `Design ${num}`,
@@ -677,7 +677,7 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
     // Pattern 2: If no ```html blocks, look for full HTML documents
     if (options.length === 0) {
       const htmlDocRegex = /<html[\s\S]*?<\/html>/gi;
-      while ((match = htmlDocRegex.exec(content)) !== null) {
+      while ((match = htmlDocRegex.exec(designContent)) !== null) {
         options.push({
           name: `Design ${options.length + 1}`,
           html: match[0],
@@ -686,15 +686,15 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
     }
 
     // Pattern 3: If still no matches, treat the whole content as HTML if it looks like HTML
-    if (options.length === 0 && content.includes('<') && content.includes('>')) {
+    if (options.length === 0 && designContent.includes('<') && designContent.includes('>')) {
       options.push({
         name: 'Design Preview',
-        html: content,
+        html: designContent,
       });
     }
 
     return options;
-  }, [designDoc?.content]);
+  }, [designContent]);
 
   const currentDesign = designOptions[selectedDesignIndex];
 
@@ -986,6 +986,10 @@ const DocsContent = ({ theme, projectId, autoSelectDocumentKey }: { theme: Theme
   );
 };
 
+// Compute "recently modified" cutoff once at module load time (not during render)
+// This avoids Date.now() calls during React render which violates purity rules
+const FIVE_MINUTES_AGO = new Date(Date.now() - 5 * 60 * 1000);
+
 const CodeContent = ({ theme, projectId }: { theme: ThemeMode; projectId: string | null }) => {
   const isDark = theme === 'dark';
   const [selectedFile, setSelectedFile] = useState<FileTreeNode | null>(null);
@@ -1101,11 +1105,15 @@ const CodeContent = ({ theme, projectId }: { theme: ThemeMode; projectId: string
 
   const fileTree = buildFileTree(allDocuments);
 
+  // Check if a file was recently modified (uses module-level constant)
+  const checkRecentlyModified = (updatedAt: Date | undefined): boolean => {
+    return updatedAt ? updatedAt > FIVE_MINUTES_AGO : false;
+  };
+
   // Count modified files in tree (for folder badge)
   const countModifiedInFolder = (node: FileTreeNode): number => {
     if (node.type === 'file') {
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      return node.updatedAt && new Date(node.updatedAt) > fiveMinutesAgo ? 1 : 0;
+      return checkRecentlyModified(node.updatedAt) ? 1 : 0;
     }
     return node.children?.reduce((sum, child) => sum + countModifiedInFolder(child), 0) || 0;
   };
@@ -1191,8 +1199,7 @@ const CodeContent = ({ theme, projectId }: { theme: ThemeMode; projectId: string
   // Render a file node
   const renderFileNode = (node: FileTreeNode, depth: number = 0) => {
     const isSelected = selectedFile?.path === node.path;
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const isRecentlyModified = node.updatedAt && new Date(node.updatedAt) > fiveMinutesAgo;
+    const isRecentlyModified = checkRecentlyModified(node.updatedAt);
     const paddingLeft = depth * 12 + 20; // Extra indent for files under folders
 
     return (

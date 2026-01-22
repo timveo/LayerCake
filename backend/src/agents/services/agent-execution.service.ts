@@ -58,9 +58,9 @@ export class AgentExecutionService {
     });
 
     const limits = {
-      FREE: 50,
-      PRO: 500,
-      TEAM: 2000,
+      FREE: 1000, // Increased for development
+      PRO: 5000,
+      TEAM: 20000,
       ENTERPRISE: Infinity,
     };
 
@@ -191,9 +191,9 @@ export class AgentExecutionService {
     });
 
     const limits = {
-      FREE: 50,
-      PRO: 500,
-      TEAM: 2000,
+      FREE: 1000, // Increased for development
+      PRO: 5000,
+      TEAM: 20000,
       ENTERPRISE: Infinity,
     };
 
@@ -446,7 +446,7 @@ ${template.prompt.context}
 
     return await this.prisma.agent.findMany({
       where: { projectId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'asc' }, // Oldest first for conversation history
     });
   }
 

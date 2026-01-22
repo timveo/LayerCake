@@ -4,6 +4,8 @@ import { PaperAirplaneIcon, StopIcon } from '@heroicons/react/24/outline';
 import { CpuChipIcon } from '@heroicons/react/24/outline';
 import { workflowApi } from '../../api/workflow';
 import { agentsApi } from '../../api/agents';
+import { gatesApi } from '../../api/gates';
+import { documentsApi } from '../../api/documents';
 
 type ThemeMode = 'dark' | 'light';
 
@@ -50,9 +52,9 @@ interface OrchestratorChatProps {
   onViewDocument?: (documentName: string) => void;
 }
 
-// Helper to detect if message contains a Project Intake document
+// Helper to detect if message contains a Project Intake document (raw markdown)
+// These are hidden since the backend sends a separate summary message
 const isIntakeDocument = (content: string): boolean => {
-  // Check for intake document in various formats (with or without code fence)
   return (
     content.includes('# Project Intake:') ||
     content.includes('```markdown\n# Project Intake') ||
@@ -61,14 +63,10 @@ const isIntakeDocument = (content: string): boolean => {
   );
 };
 
-// Transform a message to handle intake completion
+// Mark intake documents so they can be filtered out from display
 const transformMessageForDisplay = (msg: ChatMessage): ChatMessage => {
   if (msg.role === 'assistant' && isIntakeDocument(msg.content)) {
-    return {
-      ...msg,
-      isIntakeComplete: true,
-      content: "I've gathered all the information I need. Your Project Intake document is now available in the Docs tab.\n\nPlease review it and approve when ready — our agents will begin working on your project once approved. Feel free to ask any questions before approving!",
-    };
+    return { ...msg, isIntakeComplete: true };
   }
   return msg;
 };
@@ -123,6 +121,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
   activeAgent,
   streamingChunks = [],
   isAgentWorking = false,
+  agentEvents = [],
   pendingGateApproval,
   onApproveGate,
   onDenyGate,
@@ -130,6 +129,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
 }) => {
   const isDark = theme === 'dark';
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -138,24 +138,58 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
   const [denyReason, setDenyReason] = useState('');
   const [currentStreamingContent, setCurrentStreamingContent] = useState('');
 
-  // Initialize with a simple system message - agent will provide the welcome
+  // Track if we've fetched and displayed the agent's initial response
+  const hasFetchedInitialResponse = useRef(false);
+
+  // Initialize with a simple system message only when projectId changes
+  // Don't reset if we've already loaded history
   useEffect(() => {
+    if (hasFetchedInitialResponse.current) return; // Don't reset if history loaded
+
     const systemMessage: ChatMessage = {
       id: 'system-init',
       role: 'system',
       content: isNewProject
         ? 'Starting project discovery...'
-        : 'Ready to coordinate your build.',
+        : 'Loading conversation...',
       timestamp: new Date(),
     };
     setMessages([systemMessage]);
-  }, [isNewProject]);
+  }, [projectId, isNewProject]);
 
-  // Track if we've fetched and displayed the agent's initial response
-  const hasFetchedInitialResponse = useRef(false);
+  // Listen for special agent events (onboarding-complete, g1-approved, guidance)
+  useEffect(() => {
+    if (!agentEvents || agentEvents.length === 0) return;
 
-  // Fetch agent history - polls until we get a completed response
-  // This handles the race condition where agent completes before WebSocket connects
+    // Special event IDs that send messages directly from the backend
+    const specialEventIds = ['onboarding-complete', 'g1-approved', 'guidance'];
+
+    for (const eventId of specialEventIds) {
+      const event = agentEvents.find(
+        (e: AgentStreamEvent) => e.agentId === eventId && e.result
+      );
+
+      if (event && event.result) {
+        const result = event.result as { content?: string };
+        if (result.content) {
+          const messageId = `special-${eventId}`;
+          setMessages((prev) => {
+            // Don't add if we already have this message
+            if (prev.some((m) => m.id === messageId)) return prev;
+            return [...prev, {
+              id: messageId,
+              role: 'assistant' as const,
+              content: result.content!,
+              timestamp: new Date(),
+            }];
+          });
+        }
+      }
+    }
+  }, [agentEvents]);
+
+  // Fetch full conversation history from agent executions
+  // This restores the chat state when returning to a project
   useEffect(() => {
     if (!projectId) return;
 
@@ -170,9 +204,14 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
       if (cancelled || hasFetchedInitialResponse.current) return;
 
       try {
-        const history = await agentsApi.getHistory(projectId);
+        // Fetch history, documents, and gates in parallel
+        const [history, documents, gates] = await Promise.all([
+          agentsApi.getHistory(projectId),
+          documentsApi.list(projectId).catch(() => []),
+          gatesApi.list(projectId).catch(() => []),
+        ]);
 
-        // Only get COMPLETED onboarding executions with results
+        // Get all COMPLETED onboarding executions with results
         const completedOnboarding = history.filter(
           exec => exec.agentType === 'PRODUCT_MANAGER_ONBOARDING' &&
                   exec.status === 'COMPLETED' &&
@@ -182,26 +221,78 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
         if (completedOnboarding.length > 0 && !cancelled) {
           hasFetchedInitialResponse.current = true;
 
-          // Get the most recent completed execution
-          const latestExec = completedOnboarding[completedOnboarding.length - 1];
-          const historyMessage: ChatMessage = {
-            id: `history-${latestExec.id}`,
-            role: 'assistant' as const,
-            content: latestExec.outputResult!,
-            timestamp: new Date(latestExec.createdAt),
-          };
+          // Build full conversation history from all executions
+          const historyMessages: ChatMessage[] = [];
 
-          setMessages(prev => {
-            // Don't add if already exists
-            if (prev.some(m => m.id === historyMessage.id)) return prev;
-            return [...prev, historyMessage];
-          });
+          for (const exec of completedOnboarding) {
+            // Extract user message from contextData if available
+            const contextData = exec.contextData as { userMessage?: string } | null;
+            if (contextData?.userMessage) {
+              historyMessages.push({
+                id: `user-${exec.id}`,
+                role: 'user' as const,
+                content: contextData.userMessage,
+                timestamp: new Date(exec.createdAt),
+              });
+            }
+
+            // Add assistant response (always add if outputResult exists)
+            if (exec.outputResult) {
+              historyMessages.push({
+                id: `history-${exec.id}`,
+                role: 'assistant' as const,
+                content: exec.outputResult,
+                timestamp: new Date(exec.createdAt),
+              });
+            }
+          }
+
+          // Check if intake document exists - add the approval request message
+          const hasIntakeDoc = documents.some(d => d.title === 'Project Intake');
+          if (hasIntakeDoc) {
+            historyMessages.push({
+              id: 'intake-ready',
+              role: 'assistant' as const,
+              content: `Your **Project Intake** document is ready for review in the Docs tab.\n\nPlease review it and type **"approve"** to proceed, or let me know if you'd like any changes.`,
+              timestamp: new Date(),
+            });
+          }
+
+          // Check if G1 is approved - add the confirmation message
+          const g1Gate = gates.find(g => g.gateType === 'G1_PENDING' || g.gateType === 'G1_COMPLETE');
+          const isG1Approved = g1Gate?.status === 'APPROVED' || gates.some(g => g.gateType === 'G1_COMPLETE');
+
+          if (isG1Approved) {
+            // Remove the intake-ready message since G1 is already approved
+            const intakeReadyIndex = historyMessages.findIndex(m => m.id === 'intake-ready');
+            if (intakeReadyIndex !== -1) {
+              historyMessages.splice(intakeReadyIndex, 1);
+            }
+
+            // Add user's approval message and confirmation
+            historyMessages.push({
+              id: 'user-approval',
+              role: 'user' as const,
+              content: 'approve',
+              timestamp: new Date(),
+            });
+            historyMessages.push({
+              id: 'g1-approved-history',
+              role: 'assistant' as const,
+              content: `## G1 Approved - Project Scope Confirmed\n\nYour project scope has been approved and tasks have been created for all agents.\n\n**Ready for G2 - Product Requirements**\n\nThe Product Manager agent can now create your **Product Requirements Document (PRD)** which includes:\n- User stories and acceptance criteria\n- Feature prioritization\n- Success metrics\n\nType **"continue"** to start PRD creation, or ask me any questions about the project.`,
+              timestamp: new Date(),
+            });
+          }
+
+          if (historyMessages.length > 0) {
+            setMessages(historyMessages);
+          }
           return; // Stop polling
         }
 
-        // Keep polling if new project and agent hasn't completed yet
+        // Keep polling for new projects OR if no history found yet (maybe still loading)
         pollCount++;
-        if (isNewProject && pollCount < maxPolls && !cancelled) {
+        if (pollCount < maxPolls && !cancelled) {
           setTimeout(fetchAgentHistory, 1000);
         }
       } catch (error) {
@@ -254,6 +345,14 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     try {
       // Send message to onboarding agent via API
       const result = await workflowApi.sendOnboardingMessage(projectId, messageToSend);
+
+      // Check if this was a gate approval (handled synchronously, no polling needed)
+      if (result.gateApproved) {
+        // Gate was approved - the confirmation message comes via WebSocket
+        // Just stop streaming state, WebSocket handler will display the message
+        setIsStreaming(false);
+        return;
+      }
 
       // Poll for the agent's response since WebSocket events may arrive before we're ready
       const pollForResponse = async (executionId: string, attempts = 0): Promise<void> => {
@@ -313,12 +412,21 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
     }
   };
 
-  // Reset streaming state when agent finishes
+  // Reset streaming state and refocus input when agent finishes
   useEffect(() => {
     if (!isAgentWorking) {
       setIsStreaming(false);
+      // Refocus input when agent work completes
+      inputRef.current?.focus();
     }
   }, [isAgentWorking]);
+
+  // Refocus input when streaming completes
+  useEffect(() => {
+    if (!isStreaming) {
+      inputRef.current?.focus();
+    }
+  }, [isStreaming]);
 
   return (
     <div className={`flex flex-col h-full rounded-xl overflow-hidden ${isDark ? 'bg-slate-800/60' : 'bg-white border border-teal-200 shadow-sm'}`}>
@@ -341,6 +449,10 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
       <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
         {messages.map((rawMsg, i) => {
           const msg = transformMessageForDisplay(rawMsg);
+          // Skip rendering raw intake documents - backend sends a separate summary message
+          if (msg.isIntakeComplete) {
+            return null;
+          }
           return (
             <motion.div
               key={msg.id}
@@ -350,20 +462,12 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div className={`max-w-[90%] px-3 py-2 text-xs leading-relaxed rounded-2xl ${
-                msg.isIntakeComplete
-                  ? isDark ? 'bg-emerald-500/20 text-emerald-200 rounded-bl-md border border-emerald-500/30' : 'bg-emerald-50 text-emerald-800 rounded-bl-md border border-emerald-200'
-                  : msg.role === 'user'
+                msg.role === 'user'
                   ? isDark ? 'bg-teal-950 text-white rounded-br-md' : 'bg-teal-600 text-white rounded-br-md'
                   : msg.role === 'system'
                   ? isDark ? 'bg-slate-700/50 text-teal-200 rounded-bl-md italic' : 'bg-teal-200/50 text-teal-800 rounded-bl-md italic'
                   : isDark ? 'bg-slate-700 text-white rounded-bl-md' : 'bg-white text-teal-900 rounded-bl-md border border-teal-100'
               }`}>
-                {msg.isIntakeComplete && (
-                  <div className={`flex items-center gap-1.5 mb-1.5 pb-1.5 border-b ${isDark ? 'border-emerald-500/30' : 'border-emerald-200'}`}>
-                    <span className="text-emerald-500">✓</span>
-                    <span className={`font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Onboarding Complete</span>
-                  </div>
-                )}
                 <div className="whitespace-pre-wrap">{msg.content}</div>
               </div>
             </motion.div>
@@ -568,12 +672,14 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
       <div className={`p-3 border-t ${isDark ? 'border-slate-700/50' : 'border-teal-200'}`}>
         <div className={`flex items-center gap-2 rounded-full px-3 py-1.5 ${isDark ? 'bg-slate-700/50' : 'bg-white border border-teal-200'}`}>
           <input
+            ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder="Type your response..."
             disabled={isStreaming || isAgentWorking}
+            autoFocus
             className={`flex-1 bg-transparent text-xs focus:outline-none ${isDark ? 'text-white placeholder-teal-300/50' : 'text-teal-900 placeholder-teal-400'} ${(isStreaming || isAgentWorking) ? 'opacity-50' : ''}`}
           />
           {isStreaming || isAgentWorking ? (

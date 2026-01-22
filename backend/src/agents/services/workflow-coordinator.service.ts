@@ -113,6 +113,9 @@ IMPORTANT: This is just their initial idea. You have NOT asked any questions yet
 
 Begin by warmly acknowledging their project idea, then ask your FIRST question about existing code. Remember: ask only ONE question at a time and wait for the user's response before asking the next.`;
 
+    // Track execution ID for callbacks (set after executeAgentStream returns)
+    let executionId: string | null = null;
+
     // executeAgentStream now returns the ID immediately, streaming happens in background
     const agentExecutionId = await this.agentExecution.executeAgentStream(
       {
@@ -124,24 +127,33 @@ Begin by warmly acknowledging their project idea, then ask your FIRST question a
       userId,
       {
         onChunk: (chunk: string) => {
-          this.wsGateway.emitAgentChunk(projectId, agentExecutionId, chunk);
+          if (executionId) {
+            this.wsGateway.emitAgentChunk(projectId, executionId, chunk);
+          }
         },
         onComplete: async (response) => {
-          this.wsGateway.emitAgentCompleted(projectId, agentExecutionId, {
-            content: response.content,
-            usage: response.usage,
-            finishReason: response.finishReason,
-          });
+          if (executionId) {
+            this.wsGateway.emitAgentCompleted(projectId, executionId, {
+              content: response.content,
+              usage: response.usage,
+              finishReason: response.finishReason,
+            });
+          }
 
           // The agent has asked the first question - now we wait for user response
           // User responses will be handled via sendOnboardingMessage()
         },
         onError: (error) => {
           console.error('Onboarding agent error:', error);
-          this.wsGateway.emitAgentFailed(projectId, agentExecutionId, error.message);
+          if (executionId) {
+            this.wsGateway.emitAgentFailed(projectId, executionId, error.message);
+          }
         },
       },
     );
+
+    // Set execution ID for callbacks
+    executionId = agentExecutionId;
 
     // Emit agent started event
     this.wsGateway.emitAgentStarted(
@@ -179,14 +191,6 @@ Begin by warmly acknowledging their project idea, then ask your FIRST question a
       },
     });
 
-    // Check if G1 Summary exists (meaning intake was already approved)
-    const g1SummaryDocument = await this.prisma.document.findFirst({
-      where: {
-        projectId,
-        title: 'G1 Summary',
-      },
-    });
-
     // Check current gate status
     const currentGate = await this.gateStateMachine.getCurrentGate(projectId);
 
@@ -206,33 +210,11 @@ Begin by warmly acknowledging their project idea, then ask your FIRST question a
 
     // ============================================================
     // G1 APPROVAL FLOW (Single Step)
-    // When intake exists and user says approve, generate G1 Summary (if needed)
-    // and approve the gate in one action
+    // When intake exists and user says approve, approve the gate
     // ============================================================
 
     if (isApprovalMessage && intakeDocument) {
       console.log('Processing G1 approval for project:', projectId);
-
-      // Generate G1 Summary if it doesn't exist yet
-      if (!g1SummaryDocument) {
-        console.log('Creating G1 Summary document...');
-        try {
-          const { presentationContent } = await this.orchestrator.presentG1Gate(projectId, userId);
-
-          await this.prisma.document.create({
-            data: {
-              projectId,
-              title: 'G1 Summary',
-              documentType: 'REQUIREMENTS',
-              content: presentationContent,
-              version: 1,
-              createdById: userId,
-            },
-          });
-        } catch (error) {
-          console.error('Error creating G1 Summary:', error);
-        }
-      }
 
       // Ensure gate is in review state, then approve
       const gateStatus = currentGate?.status;
@@ -257,14 +239,16 @@ Begin by warmly acknowledging their project idea, then ask your FIRST question a
       // Send confirmation message
       const approvalConfirmation = `## G1 Approved - Project Scope Confirmed
 
-Your project scope has been approved.
+Your project scope has been approved and tasks have been created for all agents.
 
-**What happens next:**
-1. The **Product Manager** agent is now creating your Product Requirements Document (PRD)
-2. This includes user stories, acceptance criteria, and feature prioritization
-3. You'll review the PRD at the **G2 gate** before we begin architecture design
+**Ready for G2 - Product Requirements**
 
-I'll notify you when the PRD is ready for review.`;
+The Product Manager agent can now create your **Product Requirements Document (PRD)** which includes:
+- User stories and acceptance criteria
+- Feature prioritization
+- Success metrics
+
+Type **"continue"** to start PRD creation, or ask me any questions about the project.`;
 
       this.wsGateway.emitAgentChunk(projectId, 'g1-approved', approvalConfirmation);
       this.wsGateway.emitAgentCompleted(projectId, 'g1-approved', {
@@ -277,15 +261,31 @@ I'll notify you when the PRD is ready for review.`;
     }
 
     // ============================================================
-    // If intake document exists but user didn't say approve,
+    // POST-G1: User message after G1 is approved
+    // Use AI to determine if they want to continue to G2
+    // ============================================================
+    const g1Gate = await this.prisma.gate.findFirst({
+      where: { projectId, gateType: 'G1_PENDING' },
+    });
+    const isG1Approved = g1Gate?.status === 'APPROVED';
+
+    if (isG1Approved && intakeDocument) {
+      console.log('G1 approved - processing post-G1 user message:', message);
+
+      // Use the orchestrator agent to evaluate if user wants to continue
+      return this.handlePostG1Message(projectId, userId, message);
+    }
+
+    // ============================================================
+    // If intake document exists but G1 not yet approved,
     // guide them to review and approve
     // ============================================================
     if (intakeDocument) {
       console.log('Intake exists - guiding user to approval');
 
-      const guidanceMessage = `Your Project Intake and G1 Summary are ready for review in the **Docs** tab.
+      const guidanceMessage = `Your Project Intake is ready for review in the **Docs** tab.
 
-Please review them, then type **"approve"** to confirm the project scope and proceed to the planning phase.`;
+Type **"approve"** to approve the intake document and proceed to the planning phase.`;
 
       this.wsGateway.emitAgentChunk(projectId, 'guidance', guidanceMessage);
       this.wsGateway.emitAgentCompleted(projectId, 'guidance', {
@@ -423,12 +423,225 @@ Remember: NEVER output the intake document until you have received answers to AL
   }
 
   /**
+   * Handle user messages after G1 is approved
+   * Uses AI to evaluate intent and respond appropriately
+   */
+  private async handlePostG1Message(
+    projectId: string,
+    userId: string,
+    message: string,
+  ): Promise<{ agentExecutionId: string; gateApproved: boolean }> {
+    // Get project and intake document for context
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    });
+
+    const intakeDocument = await this.prisma.document.findFirst({
+      where: { projectId, title: 'Project Intake' },
+    });
+
+    const projectContext = intakeDocument?.content || project?.name || 'the project';
+
+    // Build the prompt for the orchestrator to evaluate the user's intent
+    const userPrompt = `You are the Project Orchestrator for "${project?.name}".
+
+The user has completed G1 (Project Scope Approval). Their Project Intake has been approved.
+
+**Current State:**
+- G1 is APPROVED
+- Tasks have been created for all agents
+- Ready to start G2 (Product Requirements Document creation)
+
+**Project Summary:**
+${projectContext.substring(0, 2000)}
+
+**User's Message:**
+"${message}"
+
+**Your Task:**
+Respond to the user's message naturally. You can:
+1. Answer questions about the project or process
+2. If they indicate they want to proceed/continue/start G2, respond with enthusiasm and confirm you're starting PRD creation. Include the exact phrase "STARTING_G2_PRD_CREATION" at the end of your response (this is a system trigger).
+3. If they have concerns or want changes, address them helpfully
+
+Keep your response concise and helpful.`;
+
+    // Execute the agent
+    const agentExecutionId = await this.agentExecution.executeAgentStream(
+      {
+        projectId,
+        agentType: 'ORCHESTRATOR',
+        userPrompt,
+        model: undefined,
+        context: { userMessage: message },
+      },
+      userId,
+      {
+        onChunk: (chunk: string) => {
+          this.wsGateway.emitAgentChunk(projectId, agentExecutionId, chunk);
+        },
+        onComplete: async (response) => {
+          this.wsGateway.emitAgentCompleted(projectId, agentExecutionId, {
+            content: response.content,
+            usage: response.usage,
+            finishReason: response.finishReason,
+          });
+
+          // Check if the agent indicated to start G2
+          if (response.content.includes('STARTING_G2_PRD_CREATION')) {
+            console.log('Starting G2 PRD creation for project:', projectId);
+            await this.startProductManagerAgent(projectId, userId);
+          }
+        },
+        onError: (error) => {
+          console.error('Post-G1 message error:', error);
+          this.wsGateway.emitAgentFailed(projectId, agentExecutionId, error.message);
+        },
+      },
+    );
+
+    this.wsGateway.emitAgentStarted(
+      projectId,
+      agentExecutionId,
+      'ORCHESTRATOR',
+      'Processing your request',
+    );
+
+    return { agentExecutionId, gateApproved: false };
+  }
+
+  /**
+   * Start the Product Manager agent to create the PRD for G2
+   */
+  private async startProductManagerAgent(
+    projectId: string,
+    userId: string,
+  ): Promise<string> {
+    // Get project and intake document for context
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+    });
+
+    const intakeDocument = await this.prisma.document.findFirst({
+      where: { projectId, title: 'Project Intake' },
+    });
+
+    const userPrompt = `Create a comprehensive Product Requirements Document (PRD) for the project "${project?.name}".
+
+**Project Intake Document:**
+${intakeDocument?.content || 'No intake document found'}
+
+**Your Task:**
+Create a detailed PRD that includes:
+
+1. **Executive Summary** - Brief overview of the product
+2. **Problem Statement** - What problem does this solve?
+3. **Goals and Objectives** - Measurable success criteria
+4. **User Stories** - Detailed user stories with acceptance criteria in the format:
+   - As a [user type], I want [goal] so that [benefit]
+   - Acceptance Criteria: [specific testable criteria]
+5. **Feature Prioritization** - MVP features vs Phase 2 features
+6. **Non-Functional Requirements** - Performance, security, scalability
+7. **Success Metrics** - KPIs to measure success
+8. **Timeline Considerations** - Based on user's constraints
+
+Output the complete PRD document in markdown format.`;
+
+    const agentExecutionId = await this.agentExecution.executeAgentStream(
+      {
+        projectId,
+        agentType: 'PRODUCT_MANAGER',
+        userPrompt,
+        model: undefined,
+      },
+      userId,
+      {
+        onChunk: (chunk: string) => {
+          this.wsGateway.emitAgentChunk(projectId, agentExecutionId, chunk);
+        },
+        onComplete: async (response) => {
+          this.wsGateway.emitAgentCompleted(projectId, agentExecutionId, {
+            content: response.content,
+            usage: response.usage,
+            finishReason: response.finishReason,
+          });
+
+          // Save the PRD as a document
+          await this.savePRDDocument(projectId, userId, response.content);
+        },
+        onError: (error) => {
+          console.error('Product Manager agent error:', error);
+          this.wsGateway.emitAgentFailed(projectId, agentExecutionId, error.message);
+        },
+      },
+    );
+
+    this.wsGateway.emitAgentStarted(
+      projectId,
+      agentExecutionId,
+      'PRODUCT_MANAGER',
+      'Creating Product Requirements Document',
+    );
+
+    return agentExecutionId;
+  }
+
+  /**
+   * Save the PRD document and notify the user it's ready for G2 review
+   */
+  private async savePRDDocument(
+    projectId: string,
+    userId: string,
+    prdContent: string,
+  ): Promise<void> {
+    console.log('Saving PRD document for project:', projectId);
+
+    // Save PRD as document
+    const document = await this.prisma.document.create({
+      data: {
+        projectId,
+        title: 'Product Requirements Document',
+        documentType: 'REQUIREMENTS',
+        content: prdContent,
+        version: 1,
+        createdById: userId,
+      },
+    });
+
+    // Notify frontend about new document
+    this.wsGateway.emitDocumentCreated(projectId, {
+      id: document.id,
+      title: document.title,
+      documentType: document.documentType,
+    });
+
+    // Transition G2 gate to IN_REVIEW
+    try {
+      await this.gateStateMachine.transitionToReview(projectId, 'G1_COMPLETE', {
+        description: 'G2 - Product Requirements Document ready for review',
+      });
+    } catch (error) {
+      console.error('Failed to transition G2 gate:', error);
+    }
+
+    // Send notification that PRD is ready
+    const readyMessage = `## PRD Ready for Review
+
+Your **Product Requirements Document** is now available in the Docs tab.
+
+Please review the PRD and type **"approve"** to proceed to G3 (Architecture), or let me know if you'd like any changes.`;
+
+    this.wsGateway.emitAgentChunk(projectId, 'g2-ready', readyMessage);
+    this.wsGateway.emitAgentCompleted(projectId, 'g2-ready', {
+      content: readyMessage,
+      usage: { inputTokens: 0, outputTokens: 0 },
+      finishReason: 'end_turn',
+    });
+  }
+
+  /**
    * Handle completion of onboarding - extract and save PROJECT_INTAKE.md
-   * Then ask user to approve the intake BEFORE showing G1 Summary.
-   *
-   * Two-step approval flow:
-   * 1. User approves Project Intake (confirms answers are correct)
-   * 2. Then G1 Summary is generated and presented for G1 gate approval
+   * Display a brief G1 summary directly in chat and ask for approval.
    */
   private async handleOnboardingComplete(
     projectId: string,
@@ -456,7 +669,7 @@ Remember: NEVER output the intake document until you have received answers to AL
 
     console.log('Creating Project Intake document, content length:', intakeContent.length);
 
-    // Save as document
+    // Save intake as document (for reference in Docs tab)
     const document = await this.prisma.document.create({
       data: {
         projectId,
@@ -475,42 +688,10 @@ Remember: NEVER output the intake document until you have received answers to AL
       documentType: document.documentType,
     });
 
-    // ============================================================
-    // Generate G1 Summary immediately after intake is created
-    // User reviews both documents together before single approval
-    // ============================================================
-    try {
-      const { presentationContent } = await this.orchestrator.presentG1Gate(projectId, userId);
+    // Simple message asking user to review and approve the intake document
+    const approvalMessage = `Your **Project Intake** document is ready for review in the Docs tab.
 
-      const g1SummaryDoc = await this.prisma.document.create({
-        data: {
-          projectId,
-          title: 'G1 Summary',
-          documentType: 'REQUIREMENTS',
-          content: presentationContent,
-          version: 1,
-          createdById: userId,
-        },
-      });
-
-      this.wsGateway.emitDocumentCreated(projectId, {
-        id: g1SummaryDoc.id,
-        title: g1SummaryDoc.title,
-        documentType: g1SummaryDoc.documentType,
-      });
-    } catch (error) {
-      console.error('Error creating G1 Summary:', error);
-    }
-
-    // Send message asking user to review and approve
-    const approvalMessage = `## Onboarding Complete
-
-I've captured all your project details. Two documents are now available in the **Docs** tab:
-
-1. **Project Intake** - Your answers to the onboarding questions
-2. **G1 Summary** - Project classification, scope metrics, and workflow plan
-
-Please review both documents, then type **"approve"** to confirm the project scope and proceed to the planning phase.`;
+Please review it and type **"approve"** to proceed, or let me know if you'd like any changes.`;
 
     this.wsGateway.emitAgentChunk(projectId, 'onboarding-complete', approvalMessage);
     this.wsGateway.emitAgentCompleted(projectId, 'onboarding-complete', {

@@ -1258,7 +1258,7 @@ const JourneyContent = ({ theme, projectId, onViewDocument }: { theme: ThemeMode
 
         {/* Alternating Gate Cards */}
         <div className="space-y-6">
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((gateNum) => {
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((gateNum) => {
             const gateData = getGateData(gateNum);
             // Use status from API/gateData instead of calculating from currentGate
             const isCompleted = gateData.status === 'completed';
@@ -2645,6 +2645,7 @@ export default function UnifiedDashboard() {
   const [streamingChunks, setStreamingChunks] = useState<string[]>([]);
   const [isAgentWorking, setIsAgentWorking] = useState(false);
   const [isStreamingDocument, setIsStreamingDocument] = useState(false);
+  const [agentEvents, setAgentEvents] = useState<Array<{ agentId: string; result?: unknown; timestamp: string }>>([]);
 
   // Document-producing agents that work in background (don't stream reasoning to chat)
   // These agents create documents that appear in the Docs tab for review
@@ -2708,9 +2709,18 @@ export default function UnifiedDashboard() {
     }
   }, [activeAgent, isBackgroundAgent, streamingChunks, isStreamingDocument]);
 
-  const handleAgentCompleted = useCallback((event: { agentType?: string; result?: unknown }) => {
+  const handleAgentCompleted = useCallback((event: { agentId?: string; agentType?: string; result?: unknown }) => {
     console.log('Agent completed:', event);
     setIsAgentWorking(false);
+
+    // Store the event for the chat component to process
+    if (event.agentId) {
+      setAgentEvents(prev => [...prev, {
+        agentId: event.agentId!,
+        result: event.result,
+        timestamp: new Date().toISOString()
+      }]);
+    }
 
     // Refresh documents when an agent completes (it may have created documents)
     const projectId = currentProjectId || searchParams.get('project');
@@ -3128,6 +3138,7 @@ export default function UnifiedDashboard() {
               activeAgent={activeAgent}
               streamingChunks={streamingChunks}
               isAgentWorking={isAgentWorking}
+              agentEvents={agentEvents}
               onApproveGate={handleGateApprove}
               onViewDocument={() => {
                 setActiveTab('docs');

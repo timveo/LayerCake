@@ -560,23 +560,12 @@ Type **"approve"** in the chat to confirm the project scope and proceed to the p
       deploymentMode = 'OPTIONAL';
     }
 
-    // Determine project type based on content
+    // Extract project type from agent's classification in the intake document
+    // The agent outputs: **Type:** [traditional/ai_ml/hybrid/enhancement]
     let projectType: ParsedIntake['projectType'] = 'traditional';
-    if (lines.includes('ml') || lines.includes('machine learning') || lines.includes('ai model')) {
-      projectType = 'ai_ml';
-    } else if (
-      (lines.includes('ai') || lines.includes('llm')) &&
-      (lines.includes('web') || lines.includes('app'))
-    ) {
-      projectType = 'hybrid';
-    } else if (
-      lines.includes('enhancement') ||
-      lines.includes('fix') ||
-      lines.includes('improve') ||
-      codeSource === 'inherited' ||
-      codeSource === 'ai_generated'
-    ) {
-      projectType = 'enhancement';
+    const typeMatch = content.match(/\*\*Type:\*\*\s*(traditional|ai_ml|hybrid|enhancement)/i);
+    if (typeMatch) {
+      projectType = typeMatch[1].toLowerCase() as ParsedIntake['projectType'];
     }
 
     // Extract success criteria (Q4)

@@ -61,7 +61,7 @@ export const workflowApi = {
   },
 
   // Send a message to the onboarding agent (conversational intake)
-  sendOnboardingMessage: async (projectId: string, message: string): Promise<{ agentExecutionId: string }> => {
+  sendOnboardingMessage: async (projectId: string, message: string): Promise<{ agentExecutionId: string; gateApproved?: boolean }> => {
     const response = await apiClient.post('/agents/workflow/onboarding-message', {
       projectId,
       message,

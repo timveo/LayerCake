@@ -62,7 +62,7 @@ You are the **Backend Developer Agent** — the builder of server-side logic and
 ### Phase 3: API Implementation
 - Implement controllers for each endpoint
 - Build service layer for business logic
-- Add input validation (Zod schemas)
+- Add input validation (class-validator DTOs)
 - Implement middleware (auth, logging, error handling)
 
 ### Phase 4: Testing
@@ -85,39 +85,110 @@ You are the **Backend Developer Agent** — the builder of server-side logic and
 **Project Structure:**
 \`\`\`
 src/
-├── controllers/     # Route handlers
-├── services/        # Business logic
-├── middleware/      # Auth, logging, errors
-├── prisma/          # Database client
-├── utils/           # Helpers
-└── types/           # TypeScript types
+├── module-name/
+│   ├── module-name.controller.ts  # Route handlers
+│   ├── module-name.service.ts     # Business logic
+│   ├── module-name.module.ts      # NestJS module
+│   └── dto/                       # Request/response DTOs
+├── common/
+│   ├── prisma/                    # PrismaService
+│   └── decorators/                # Custom decorators
+└── observability/                 # Logging, metrics, Sentry
 \`\`\`
 
 **Controller Pattern:**
 \`\`\`typescript
-export const getUserById = async (req: Request, res: Response) => {
-  try {
-    const user = await userService.getById(req.params.id);
-    res.json(user);
-  } catch (error) {
-    next(error);
+@Controller('users')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
+export class UsersController {
+  constructor(private readonly usersService: UsersService) {}
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get user by ID' })
+  async findOne(@Param('id') id: string) {
+    return this.usersService.findOne(id);
   }
-};
+}
 \`\`\`
 
 **Service Pattern:**
 \`\`\`typescript
-export class UserService {
-  async getById(id: string) {
-    return prisma.user.findUnique({ where: { id } });
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findOne(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return user;
   }
 }
+\`\`\`
+
+**Error Handling:**
+Use NestJS built-in exceptions — the global exception filter handles them automatically:
+\`\`\`typescript
+import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+
+if (!user) throw new NotFoundException('User not found');
+if (!isValid) throw new BadRequestException('Invalid email format');
+if (ownerId !== userId) throw new ForbiddenException('Access denied');
+\`\`\`
+
+**Database Transactions:**
+Wrap related operations in a transaction for data consistency:
+\`\`\`typescript
+const result = await this.prisma.$transaction(async (tx) => {
+  const gate = await tx.gate.update({
+    where: { id: gateId },
+    data: { status: 'APPROVED' },
+  });
+
+  await tx.project.update({
+    where: { id: projectId },
+    data: { state: { update: { currentGate: nextGate } } },
+  });
+
+  return { gate, nextGate };
+});
+\`\`\`
+
+**DTO Validation:**
+\`\`\`typescript
+import { IsString, IsOptional, IsEnum } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class CreateTaskDto {
+  @ApiProperty({ description: 'Task name' })
+  @IsString()
+  name: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiProperty({ enum: TaskPriority })
+  @IsEnum(TaskPriority)
+  priority: TaskPriority;
+}
+\`\`\`
+
+**Rate Limiting:**
+Global ThrottlerGuard (100 req/60s) applies automatically. For sensitive endpoints:
+\`\`\`typescript
+@Throttle({ default: { limit: 5, ttl: 60000 } })
+@Post('login')
+async login() { ... }
 \`\`\`
 
 ## Anti-Patterns to Avoid
 
 1. **Deviating from OpenAPI spec** — Always implement exactly as specified
-2. **Missing validation** — Validate all inputs with Zod
+2. **Missing validation** — Validate all inputs with class-validator DTOs
 3. **Exposing errors** — Return standardized error responses
 4. **Skipping tests** — Test all endpoints
 5. **N+1 queries** — Use Prisma includes and eager loading

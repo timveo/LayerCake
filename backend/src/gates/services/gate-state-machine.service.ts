@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { getGateConfig, getDeliverablesForGate } from '../gate-config';
@@ -35,6 +35,8 @@ const INVALID_APPROVAL_KEYWORDS = ['ok', 'sure', 'fine', 'alright'];
 
 @Injectable()
 export class GateStateMachineService {
+  private readonly logger = new Logger(GateStateMachineService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -75,9 +77,12 @@ export class GateStateMachineService {
         })),
       });
 
-      console.log(
-        `[GateStateMachine] Initialized project with ${deliverables.length} deliverables for G1_PENDING`,
-      );
+      this.logger.log({
+        message: 'Project gates initialized',
+        projectId,
+        gateType: 'G1_PENDING',
+        deliverableCount: deliverables.length,
+      });
     }
   }
 
@@ -251,6 +256,13 @@ export class GateStateMachineService {
         updatedAt: new Date(),
       },
     });
+
+    this.logger.log({
+      message: 'Gate transitioned to review',
+      projectId,
+      gateId: gate.id,
+      gateType,
+    });
   }
 
   /**
@@ -286,8 +298,15 @@ export class GateStateMachineService {
       throw new BadRequestException(`Gate ${gateType} not found`);
     }
 
+    this.logger.log({
+      message: 'Gate approval started',
+      projectId,
+      gateType,
+      userId,
+    });
+
     // Wrap all write operations in a transaction for data consistency
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // Approve the gate
       await tx.gate.update({
         where: { id: gate.id },
@@ -350,6 +369,16 @@ export class GateStateMachineService {
 
       return { success: true };
     });
+
+    this.logger.log({
+      message: 'Gate state transition completed',
+      projectId,
+      fromGate: gateType,
+      toGate: result.nextGate || 'PROJECT_COMPLETE',
+      userId,
+    });
+
+    return result;
   }
 
   /**
@@ -381,6 +410,15 @@ export class GateStateMachineService {
         blockingReason,
         updatedAt: new Date(),
       },
+    });
+
+    this.logger.warn({
+      message: 'Gate rejected',
+      projectId,
+      gateId: gate.id,
+      gateType,
+      userId,
+      reason: blockingReason,
     });
   }
 
@@ -450,10 +488,13 @@ export class GateStateMachineService {
         })),
       });
 
-      console.log(
-        `[GateStateMachine] Created ${deliverables.length} deliverables for gate ${gateType}:`,
-        deliverables.map((d) => d.name).join(', '),
-      );
+      this.logger.log({
+        message: 'Gate deliverables created',
+        projectId,
+        gateType,
+        deliverableCount: deliverables.length,
+        deliverables: deliverables.map((d) => d.name),
+      });
     }
   }
 
@@ -484,7 +525,11 @@ export class GateStateMachineService {
     });
 
     if (!existingGate) {
-      console.log(`[GateStateMachine] Creating missing gate: ${gateType}`);
+      this.logger.warn({
+        message: 'Creating missing gate',
+        projectId,
+        gateType,
+      });
       await this.createNextGate(projectId, gateType);
     }
   }

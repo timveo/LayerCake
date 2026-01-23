@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -12,6 +13,8 @@ import { ApproveGateDto } from './dto/approve-gate.dto';
 
 @Injectable()
 export class GatesService {
+  private readonly logger = new Logger(GatesService.name);
+
   constructor(
     private prisma: PrismaService,
     private stateMachine: GateStateMachineService,
@@ -40,6 +43,14 @@ export class GatesService {
         project: true,
         proofArtifacts: true,
       },
+    });
+
+    this.logger.log({
+      message: 'Gate created',
+      gateId: gate.id,
+      gateType: gate.gateType,
+      projectId: gate.projectId,
+      userId,
     });
 
     return gate;
@@ -143,6 +154,15 @@ export class GatesService {
       throw new ForbiddenException('You can only approve gates for your own projects');
     }
 
+    this.logger.log({
+      message: 'Gate approval requested',
+      gateId: id,
+      gateType: gate.gateType,
+      projectId: gate.projectId,
+      userId,
+      approved: approveGateDto.approved,
+    });
+
     // Check if proof artifacts are required and present
     if (gate.requiresProof) {
       const approvedArtifacts = gate.proofArtifacts.filter(
@@ -150,6 +170,13 @@ export class GatesService {
       );
 
       if (approvedArtifacts.length === 0) {
+        this.logger.warn({
+          message: 'Gate approval denied - missing proof artifacts',
+          gateId: id,
+          gateType: gate.gateType,
+          projectId: gate.projectId,
+          userId,
+        });
         throw new BadRequestException('Cannot approve gate: No approved proof artifacts found');
       }
     }
@@ -163,6 +190,16 @@ export class GatesService {
         'approved',
         approveGateDto.reviewNotes,
       );
+
+      this.logger.log({
+        message: 'Gate approved successfully',
+        gateId: id,
+        gateType: gate.gateType,
+        projectId: gate.projectId,
+        userId,
+        reviewNotes: approveGateDto.reviewNotes,
+        proofArtifactCount: gate.proofArtifacts?.length,
+      });
     } else {
       await this.stateMachine.rejectGate(
         gate.projectId,
@@ -170,6 +207,15 @@ export class GatesService {
         userId,
         approveGateDto.rejectionReason || 'Rejected by user',
       );
+
+      this.logger.warn({
+        message: 'Gate rejected',
+        gateId: id,
+        gateType: gate.gateType,
+        projectId: gate.projectId,
+        userId,
+        reason: approveGateDto.rejectionReason || 'Rejected by user',
+      });
     }
 
     // Return the updated gate
@@ -192,6 +238,14 @@ export class GatesService {
 
     await this.prisma.gate.delete({
       where: { id },
+    });
+
+    this.logger.log({
+      message: 'Gate deleted',
+      gateId: id,
+      gateType: gate.gateType,
+      projectId: gate.projectId,
+      userId,
     });
 
     return { message: 'Gate deleted successfully' };

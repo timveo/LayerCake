@@ -19,6 +19,10 @@ export interface AIProviderStreamCallback {
   onError: (error: Error) => void;
 }
 
+// Timeout constants (in milliseconds)
+const AI_REQUEST_TIMEOUT = 300000; // 5 minutes for standard requests
+const AI_STREAM_TIMEOUT = 600000; // 10 minutes for streaming (may have multiple chunks)
+
 @Injectable()
 export class AIProviderService {
   private anthropic: Anthropic;
@@ -51,17 +55,20 @@ export class AIProviderService {
       throw new Error('Claude API key not configured');
     }
 
-    const response = await this.anthropic.messages.create({
-      model,
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [
-        {
-          role: 'user',
-          content: userPrompt,
-        },
-      ],
-    });
+    const response = await this.anthropic.messages.create(
+      {
+        model,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [
+          {
+            role: 'user',
+            content: userPrompt,
+          },
+        ],
+      },
+      { timeout: AI_REQUEST_TIMEOUT },
+    );
 
     const textContent = response.content.find((c) => c.type === 'text');
 
@@ -86,20 +93,23 @@ export class AIProviderService {
       throw new Error('OpenAI API key not configured');
     }
 
-    const response = await this.openai.chat.completions.create({
-      model,
-      max_tokens: maxTokens,
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt,
-        },
-        {
-          role: 'user',
-          content: userPrompt,
-        },
-      ],
-    });
+    const response = await this.openai.chat.completions.create(
+      {
+        model,
+        max_tokens: maxTokens,
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt,
+          },
+          {
+            role: 'user',
+            content: userPrompt,
+          },
+        ],
+      },
+      { timeout: AI_REQUEST_TIMEOUT },
+    );
 
     const choice = response.choices[0];
 
@@ -150,18 +160,21 @@ export class AIProviderService {
     }
 
     try {
-      const stream = await this.anthropic.messages.create({
-        model,
-        max_tokens: maxTokens,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: userPrompt,
-          },
-        ],
-        stream: true,
-      });
+      const stream = await this.anthropic.messages.create(
+        {
+          model,
+          max_tokens: maxTokens,
+          system: systemPrompt,
+          messages: [
+            {
+              role: 'user',
+              content: userPrompt,
+            },
+          ],
+          stream: true,
+        },
+        { timeout: AI_STREAM_TIMEOUT },
+      );
 
       let fullContent = '';
       let inputTokens = 0;
@@ -210,21 +223,24 @@ export class AIProviderService {
     }
 
     try {
-      const stream = await this.openai.chat.completions.create({
-        model,
-        max_tokens: maxTokens,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt,
-          },
-          {
-            role: 'user',
-            content: userPrompt,
-          },
-        ],
-        stream: true,
-      });
+      const stream = await this.openai.chat.completions.create(
+        {
+          model,
+          max_tokens: maxTokens,
+          messages: [
+            {
+              role: 'system',
+              content: systemPrompt,
+            },
+            {
+              role: 'user',
+              content: userPrompt,
+            },
+          ],
+          stream: true,
+        },
+        { timeout: AI_STREAM_TIMEOUT },
+      );
 
       let fullContent = '';
       const inputTokens = 0;

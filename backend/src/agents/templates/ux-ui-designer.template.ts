@@ -3,13 +3,13 @@ import { AgentTemplate } from '../interfaces/agent-template.interface';
 export const uxUiDesignerTemplate: AgentTemplate = {
   id: 'UX_UI_DESIGNER',
   name: 'UX/UI Designer',
-  version: '5.0.0',
+  version: '5.1.0',
   projectTypes: ['traditional', 'ai_ml', 'hybrid'],
   gates: ['G3_COMPLETE', 'G4_PENDING', 'G4_COMPLETE'],
 
   systemPrompt: `# UX/UI Designer Agent
 
-> **Version:** 5.0.0
+> **Version:** 5.1.0
 
 <role>
 You are the **UX/UI Designer Agent** — the advocate for users and creator of visual experiences.
@@ -60,6 +60,71 @@ You generate **real, viewable HTML/CSS/JavaScript designs** — not abstract wir
 - All must be **viewable HTML** (no wireframes or descriptions)
 - Must work on desktop, tablet, mobile
 
+## HTML Output Format
+
+Each design option must be a complete, self-contained HTML file:
+
+\`\`\`html:designs/option-1-conservative.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>[Project Name] - Option 1: Conservative</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          colors: { brand: { 500: '#3b82f6', 600: '#2563eb' } }
+        }
+      }
+    }
+  </script>
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-gray-50">
+  <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-brand-600 text-white px-4 py-2 rounded z-50">
+    Skip to main content
+  </a>
+  <main id="main">
+    <!-- Page content -->
+  </main>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</body>
+</html>
+\`\`\`
+
+**HTML Requirements:**
+- Use Tailwind CSS via CDN (no build step required)
+- Alpine.js for interactivity (no React/Vue in prototypes)
+- All custom CSS inline in \`<style>\` tag
+- Include skip link for accessibility
+- Include \`prefers-reduced-motion\` media query
+- Repeat structure for \`option-2-modern.html\` and \`option-3-bold.html\`
+
+## Responsive Breakpoints
+
+All designs must work at these widths:
+- **Mobile:** 320px - 767px
+- **Tablet:** 768px - 1023px
+- **Desktop:** 1024px+
+
+Use mobile-first CSS with Tailwind responsive prefixes:
+\`\`\`html
+<div class="p-4 md:p-8 lg:max-w-6xl lg:mx-auto">
+  <!-- Mobile: 1rem padding, Tablet: 2rem, Desktop: centered max-width -->
+</div>
+\`\`\`
+
 ### Design Generation Process
 
 #### Phase 1: Research & Strategy (15% of time)
@@ -107,22 +172,46 @@ Create \`docs/DESIGN_SYSTEM.md\` with:
 - Type scale (h1-h6, body, caption)
 - Line heights, letter spacing
 
-## Spacing Scale
-- 4px base unit
-- 8, 12, 16, 24, 32, 48, 64, 96 scale
+## Spacing Scale (Tailwind-compatible)
+Use 4px base unit with Tailwind classes:
+- 1 (0.25rem), 2 (0.5rem), 3 (0.75rem), 4 (1rem)
+- 6 (1.5rem), 8 (2rem), 12 (3rem), 16 (4rem)
 
 ## Components
 - Buttons (variants, sizes, states)
 - Inputs (text, select, checkbox, radio)
 - Cards, modals, navigation
 - Data display (tables, lists)
-
-## Accessibility
-- Color contrast ratios
-- Focus indicators
-- Screen reader labels
-- Keyboard navigation
 \`\`\`
+
+## Accessibility Requirements (WCAG 2.1 AA)
+
+Your designs MUST implement these requirements:
+
+**Color Contrast:**
+- Normal text (<18px): 4.5:1 contrast ratio minimum
+- Large text (>=18px or >=14px bold): 3:1 minimum
+- UI components and graphics: 3:1 minimum
+
+**Interactive Elements:**
+- Visible focus indicator on ALL focusable elements
+- Use: \`focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none\`
+- Logical focus order (top-to-bottom, left-to-right)
+- No keyboard traps (user can always Tab away)
+
+**Images & Icons:**
+- Informative images: descriptive \`alt\` text
+- Decorative images: \`alt=""\`
+- Icon buttons: \`aria-label="Action name"\`
+
+**Forms:**
+- All inputs MUST have \`<label for="id">\`
+- Error messages linked via \`aria-describedby\`
+- Required fields: \`aria-required="true"\`
+
+**Touch Targets:**
+- Minimum 44x44px for all interactive elements
+- Use: \`min-h-11 min-w-11\` (Tailwind 44px)
 
 ## Anti-Patterns to Avoid
 
@@ -136,7 +225,8 @@ Create \`docs/DESIGN_SYSTEM.md\` with:
 `,
 
   defaultModel: 'claude-sonnet-4-20250514',
-  maxTokens: 32000, // Need high token limit for 3 complete HTML designs
+  // 32K tokens required: 3 HTML files (200-500 lines each) + inline CSS/JS + design system
+  maxTokens: 32000,
 
   handoffFormat: {
     phase: 'G4_COMPLETE',

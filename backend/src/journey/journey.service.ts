@@ -167,7 +167,10 @@ export interface JourneyData {
 @Injectable()
 export class JourneyService {
   // Cache for teaching moments to avoid repeated AI calls
-  private teachingMomentsCache = new Map<string, { moments: Array<{ title: string; description: string }>; timestamp: number }>();
+  private teachingMomentsCache = new Map<
+    string,
+    { moments: Array<{ title: string; description: string }>; timestamp: number }
+  >();
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(
@@ -262,7 +265,8 @@ export class JourneyService {
       // A gate is only "completed" if it has been approved (has approvedAt timestamp)
       let status: 'completed' | 'current' | 'upcoming';
       const isGateApproved = gateRecord?.approvedAt != null;
-      const isGateInProgress = gateRecord?.status === 'IN_REVIEW' || gateRecord?.status === 'PENDING';
+      const isGateInProgress =
+        gateRecord?.status === 'IN_REVIEW' || gateRecord?.status === 'PENDING';
 
       if (isGateApproved) {
         status = 'completed';
@@ -317,11 +321,11 @@ export class JourneyService {
         'project intake': 1,
         'g1 summary': 1,
         'product requirements document': 2,
-        'prd': 2,
+        prd: 2,
         'system architecture': 3,
-        'architecture': 3,
+        architecture: 3,
         'design system': 4,
-        'wireframes': 4,
+        wireframes: 4,
       };
 
       // Type-based mapping only used as fallback when title doesn't match any known document
@@ -329,13 +333,13 @@ export class JourneyService {
       // So we don't include REQUIREMENTS in this fallback - rely on title matching instead
       const docTypeToGate: Record<string, number> = {
         // 'REQUIREMENTS' intentionally omitted - use title matching for these
-        'PRD': 2,          // PRD type (if ever used)
-        'ARCHITECTURE': 3, // Architecture belongs to G3
-        'DESIGN': 4,       // Design belongs to G4
-        'CODE': 5,         // Code belongs to G5
-        'TEST': 6,         // Test belongs to G6
-        'SECURITY': 7,     // Security belongs to G7
-        'DEPLOYMENT': 8,   // Deployment belongs to G8
+        PRD: 2, // PRD type (if ever used)
+        ARCHITECTURE: 3, // Architecture belongs to G3
+        DESIGN: 4, // Design belongs to G4
+        CODE: 5, // Code belongs to G5
+        TEST: 6, // Test belongs to G6
+        SECURITY: 7, // Security belongs to G7
+        DEPLOYMENT: 8, // Deployment belongs to G8
       };
 
       const gateDocuments = documents
@@ -482,9 +486,10 @@ export class JourneyService {
 
     // Truncate content if too long to avoid token limits
     const maxContentLength = 8000;
-    const truncatedContent = docContent.length > maxContentLength
-      ? docContent.substring(0, maxContentLength) + '\n\n[Content truncated...]'
-      : docContent;
+    const truncatedContent =
+      docContent.length > maxContentLength
+        ? docContent.substring(0, maxContentLength) + '\n\n[Content truncated...]'
+        : docContent;
 
     const prompt = `Analyze this ${docTitle} document and extract key teaching moments and a summary.
 
@@ -521,7 +526,10 @@ Guidelines:
       const responseText = response.content;
 
       // Try to extract JSON from the response
-      let parsed: { summary: string; teachingMoments: Array<{ title: string; description: string }> };
+      let parsed: {
+        summary: string;
+        teachingMoments: Array<{ title: string; description: string }>;
+      };
 
       try {
         // First try direct parse
@@ -549,7 +557,7 @@ Guidelines:
 
       return {
         summary: parsed.summary.substring(0, 300),
-        teachingMoments: parsed.teachingMoments.slice(0, 5).map(tm => ({
+        teachingMoments: parsed.teachingMoments.slice(0, 5).map((tm) => ({
           title: tm.title?.substring(0, 50) || 'Key Decision',
           description: tm.description?.substring(0, 200) || 'Important milestone achieved',
         })),
@@ -586,26 +594,46 @@ Guidelines:
   /**
    * Get default teaching moments for a gate when AI extraction fails
    */
-  private getDefaultTeachingMoments(gateNum: number): Array<{ title: string; description: string }> {
+  private getDefaultTeachingMoments(
+    gateNum: number,
+  ): Array<{ title: string; description: string }> {
     const defaults: Record<number, Array<{ title: string; description: string }>> = {
       1: [
-        { title: 'Scope defined', description: 'Project boundaries and success criteria established' },
-        { title: 'Constraints identified', description: 'Technical and business constraints documented' },
+        {
+          title: 'Scope defined',
+          description: 'Project boundaries and success criteria established',
+        },
+        {
+          title: 'Constraints identified',
+          description: 'Technical and business constraints documented',
+        },
       ],
       2: [
-        { title: 'User stories created', description: 'Requirements expressed as user-centric stories' },
+        {
+          title: 'User stories created',
+          description: 'Requirements expressed as user-centric stories',
+        },
         { title: 'Features prioritized', description: 'MVP scope defined with clear priorities' },
       ],
       3: [
-        { title: 'Tech stack selected', description: 'Technology choices aligned with project needs' },
-        { title: 'Architecture documented', description: 'System design with clear component boundaries' },
+        {
+          title: 'Tech stack selected',
+          description: 'Technology choices aligned with project needs',
+        },
+        {
+          title: 'Architecture documented',
+          description: 'System design with clear component boundaries',
+        },
       ],
       4: [
         { title: 'Design system created', description: 'Consistent visual language established' },
         { title: 'User flows mapped', description: 'Key user journeys designed and validated' },
       ],
       5: [
-        { title: 'Features implemented', description: 'Core functionality built per specifications' },
+        {
+          title: 'Features implemented',
+          description: 'Core functionality built per specifications',
+        },
         { title: 'Code quality maintained', description: 'Implementation follows best practices' },
       ],
       6: [
@@ -614,7 +642,10 @@ Guidelines:
       ],
       7: [
         { title: 'Security reviewed', description: 'Vulnerabilities assessed and addressed' },
-        { title: 'Best practices applied', description: 'Security standards implemented throughout' },
+        {
+          title: 'Best practices applied',
+          description: 'Security standards implemented throughout',
+        },
       ],
       8: [
         { title: 'Deployment ready', description: 'Infrastructure and processes validated' },
@@ -625,6 +656,10 @@ Guidelines:
         { title: 'Monitoring active', description: 'Health metrics being tracked' },
       ],
     };
-    return defaults[gateNum] || [{ title: 'Milestone achieved', description: 'Gate requirements completed' }];
+    return (
+      defaults[gateNum] || [
+        { title: 'Milestone achieved', description: 'Gate requirements completed' },
+      ]
+    );
   }
 }

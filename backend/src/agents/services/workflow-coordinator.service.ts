@@ -76,9 +76,7 @@ export class WorkflowCoordinatorService {
     const teachingLevel = user?.teachingLevel || 'INTERMEDIATE';
 
     // Check for key documents to make state explicit
-    const hasPRD = documents.some(
-      (d) => d.title === 'Product Requirements Document',
-    );
+    const hasPRD = documents.some((d) => d.title === 'Product Requirements Document');
 
     let situationDescription: string;
     let taskInstructions: string;
@@ -178,7 +176,12 @@ Keep your response concise and helpful. Use markdown formatting.`;
       },
     );
 
-    this.wsGateway.emitAgentStarted(projectId, agentExecutionId, 'ORCHESTRATOR', 'Updating you on progress');
+    this.wsGateway.emitAgentStarted(
+      projectId,
+      agentExecutionId,
+      'ORCHESTRATOR',
+      'Updating you on progress',
+    );
   }
 
   /**
@@ -701,7 +704,9 @@ Keep your response concise and helpful. Don't be pushy about approval.`;
     const currentGateType = currentGate?.gateType || 'G2_PENDING';
     const currentGateNumber = this.extractGateNumber(currentGateType);
 
-    console.log(`[handlePostG1Message] Current gate: ${currentGateType}, status: ${currentGate?.status}`);
+    console.log(
+      `[handlePostG1Message] Current gate: ${currentGateType}, status: ${currentGate?.status}`,
+    );
 
     // Get relevant documents for context
     const documents = await this.prisma.document.findMany({
@@ -710,8 +715,15 @@ Keep your response concise and helpful. Don't be pushy about approval.`;
     });
 
     const prdDoc = documents.find((d) => d.title === 'Product Requirements Document');
-    const archDoc = documents.find((d) => d.title === 'System Architecture' || d.title === 'System Architecture Document' || d.documentType === 'ARCHITECTURE');
-    const designDoc = documents.find((d) => d.title === 'Design System Document' || d.title === 'Design System');
+    const archDoc = documents.find(
+      (d) =>
+        d.title === 'System Architecture' ||
+        d.title === 'System Architecture Document' ||
+        d.documentType === 'ARCHITECTURE',
+    );
+    const designDoc = documents.find(
+      (d) => d.title === 'Design System Document' || d.title === 'Design System',
+    );
 
     const projectContext = intakeDocument?.content || project?.name || 'the project';
 
@@ -727,12 +739,22 @@ Keep your response concise and helpful. Don't be pushy about approval.`;
     // 3. Message contains feedback
     const isInReview = currentGate?.status === 'IN_REVIEW';
     const hasFeedback = this.isFeedbackMessage(message);
-    const hasRelevantDoc = (currentGateNumber === 2 && prdDoc) ||
-                           (currentGateNumber === 3 && archDoc) ||
-                           (currentGateNumber === 4 && designDoc);
+    const hasRelevantDoc =
+      (currentGateNumber === 2 && prdDoc) ||
+      (currentGateNumber === 3 && archDoc) ||
+      (currentGateNumber === 4 && designDoc);
 
-    if (isInReview && !runningAgent && hasFeedback && hasRelevantDoc && currentGateNumber >= 2 && currentGateNumber <= 4) {
-      console.log(`[handlePostG1Message] Detected feedback for G${currentGateNumber} document, triggering revision`);
+    if (
+      isInReview &&
+      !runningAgent &&
+      hasFeedback &&
+      hasRelevantDoc &&
+      currentGateNumber >= 2 &&
+      currentGateNumber <= 4
+    ) {
+      console.log(
+        `[handlePostG1Message] Detected feedback for G${currentGateNumber} document, triggering revision`,
+      );
 
       // Log feedback to Change Requests document
       await this.logFeedbackToChangeRequests(projectId, currentGateNumber, message, userId);
@@ -846,7 +868,8 @@ Keep your response concise and helpful.`;
     const existingDoc = await this.prisma.document.findFirst({
       where: {
         projectId,
-        documentType: gateNumber === 2 ? 'REQUIREMENTS' : gateNumber === 3 ? 'ARCHITECTURE' : 'OTHER',
+        documentType:
+          gateNumber === 2 ? 'REQUIREMENTS' : gateNumber === 3 ? 'ARCHITECTURE' : 'OTHER',
         title: { not: 'Project Intake' },
       },
       orderBy: { updatedAt: 'desc' },
@@ -1020,7 +1043,13 @@ Generate the complete revised document now.`;
   private classifyFeedbackType(feedback: string): string {
     const lower = feedback.toLowerCase();
 
-    if (lower.includes('change') || lower.includes('update') || lower.includes('modify') || lower.includes('use ') || lower.includes('switch')) {
+    if (
+      lower.includes('change') ||
+      lower.includes('update') ||
+      lower.includes('modify') ||
+      lower.includes('use ') ||
+      lower.includes('switch')
+    ) {
       return 'CHANGE_REQUEST';
     }
     if (lower.includes('prefer') || lower.includes('would like') || lower.includes('want to')) {
@@ -1029,16 +1058,31 @@ Generate the complete revised document now.`;
     if (lower.includes('suggest') || lower.includes('recommend') || lower.includes('consider')) {
       return 'SUGGESTION';
     }
-    if (lower.includes('?') || lower.includes('what') || lower.includes('how') || lower.includes('why')) {
+    if (
+      lower.includes('?') ||
+      lower.includes('what') ||
+      lower.includes('how') ||
+      lower.includes('why')
+    ) {
       return 'QUESTION';
     }
     if (lower.includes('approve') || lower.includes('looks good') || lower.includes('lgtm')) {
       return 'APPROVAL';
     }
-    if (lower.includes('reject') || lower.includes('don\'t') || lower.includes('wrong') || lower.includes('incorrect')) {
+    if (
+      lower.includes('reject') ||
+      lower.includes("don't") ||
+      lower.includes('wrong') ||
+      lower.includes('incorrect')
+    ) {
       return 'REJECTION';
     }
-    if (lower.includes('bug') || lower.includes('error') || lower.includes('issue') || lower.includes('broken')) {
+    if (
+      lower.includes('bug') ||
+      lower.includes('error') ||
+      lower.includes('issue') ||
+      lower.includes('broken')
+    ) {
       return 'BUG_REPORT';
     }
     if (lower.includes('clarify') || lower.includes('explain') || lower.includes('understand')) {
@@ -1054,11 +1098,32 @@ Generate the complete revised document now.`;
   private analyzeSentiment(feedback: string): string {
     const lower = feedback.toLowerCase();
 
-    const positiveWords = ['good', 'great', 'love', 'like', 'approve', 'excellent', 'perfect', 'thanks', 'helpful'];
-    const negativeWords = ['bad', 'wrong', 'incorrect', 'don\'t', 'hate', 'terrible', 'issue', 'problem', 'bug', 'error'];
+    const positiveWords = [
+      'good',
+      'great',
+      'love',
+      'like',
+      'approve',
+      'excellent',
+      'perfect',
+      'thanks',
+      'helpful',
+    ];
+    const negativeWords = [
+      'bad',
+      'wrong',
+      'incorrect',
+      "don't",
+      'hate',
+      'terrible',
+      'issue',
+      'problem',
+      'bug',
+      'error',
+    ];
 
-    const positiveCount = positiveWords.filter(w => lower.includes(w)).length;
-    const negativeCount = negativeWords.filter(w => lower.includes(w)).length;
+    const positiveCount = positiveWords.filter((w) => lower.includes(w)).length;
+    const negativeCount = negativeWords.filter((w) => lower.includes(w)).length;
 
     if (positiveCount > negativeCount) return 'POSITIVE';
     if (negativeCount > positiveCount) return 'NEGATIVE';
@@ -1070,16 +1135,36 @@ Generate the complete revised document now.`;
    */
   private isFeedbackMessage(message: string): boolean {
     const feedbackIndicators = [
-      'change', 'update', 'modify', 'revise', 'edit',
-      'use ', 'switch to', 'instead', 'prefer',
-      'add ', 'remove', 'include', 'don\'t', 'do not',
-      'should be', 'needs to', 'want to', 'would like',
-      'microservices', 'docker', 'railway', 'vercel', 'aws',
-      'feedback', 'suggestion', 'recommendation',
+      'change',
+      'update',
+      'modify',
+      'revise',
+      'edit',
+      'use ',
+      'switch to',
+      'instead',
+      'prefer',
+      'add ',
+      'remove',
+      'include',
+      "don't",
+      'do not',
+      'should be',
+      'needs to',
+      'want to',
+      'would like',
+      'microservices',
+      'docker',
+      'railway',
+      'vercel',
+      'aws',
+      'feedback',
+      'suggestion',
+      'recommendation',
     ];
 
     const lowerMessage = message.toLowerCase();
-    return feedbackIndicators.some(indicator => lowerMessage.includes(indicator));
+    return feedbackIndicators.some((indicator) => lowerMessage.includes(indicator));
   }
 
   /**
@@ -1088,7 +1173,11 @@ Generate the complete revised document now.`;
   private buildGateContext(
     gateType: string,
     gateStatus: string,
-    docs: { prdDoc?: { content: string | null }; archDoc?: { content: string | null }; designDoc?: { content: string | null } },
+    docs: {
+      prdDoc?: { content: string | null };
+      archDoc?: { content: string | null };
+      designDoc?: { content: string | null };
+    },
   ): { currentStateDescription: string; userTaskInstructions: string } {
     const gateNumber = this.extractGateNumber(gateType);
     const isInReview = gateStatus === 'IN_REVIEW';
@@ -1230,7 +1319,9 @@ If they want to approve the current gate, they can type "approve".`,
       },
     });
     if (runningPM) {
-      console.log(`[PRD Creation] Product Manager already running for project ${projectId}, skipping`);
+      console.log(
+        `[PRD Creation] Product Manager already running for project ${projectId}, skipping`,
+      );
       return runningPM.id;
     }
 
@@ -1274,7 +1365,9 @@ Create a single, complete PRD document. Do NOT repeat sections. Output only the 
           const execSummaryCount = (response.content.match(/Executive Summary/gi) || []).length;
           console.log(`[PRD Debug] "Executive Summary" occurrences: ${execSummaryCount}`);
           if (execSummaryCount > 1) {
-            console.warn(`[PRD Debug] WARNING: Content appears duplicated ${execSummaryCount} times!`);
+            console.warn(
+              `[PRD Debug] WARNING: Content appears duplicated ${execSummaryCount} times!`,
+            );
           }
 
           // Save the PRD as a document
@@ -1306,7 +1399,9 @@ Create a single, complete PRD document. Do NOT repeat sections. Output only the 
     userId: string,
     prdContent: string,
   ): Promise<void> {
-    console.log(`[PRD Save] Saving PRD document for project: ${projectId}, content length: ${prdContent.length}`);
+    console.log(
+      `[PRD Save] Saving PRD document for project: ${projectId}, content length: ${prdContent.length}`,
+    );
 
     // Check if PRD already exists (to update instead of creating duplicate)
     const existingPRD = await this.prisma.document.findFirst({
@@ -2158,7 +2253,13 @@ Create a single, complete PRD document. Do NOT repeat sections. Output only the 
               // Wait a bit before retrying
               setTimeout(async () => {
                 try {
-                  await this.executeSingleAgent(projectId, agentType, gateType, userId, handoffContext);
+                  await this.executeSingleAgent(
+                    projectId,
+                    agentType,
+                    gateType,
+                    userId,
+                    handoffContext,
+                  );
                 } catch (retryError) {
                   console.error(`[WorkflowCoordinator] Retry failed for ${agentType}:`, retryError);
                 }
@@ -2522,10 +2623,7 @@ This is an automatic checkpoint commit created after gate approval.`;
    * Check if a gate is stuck (has failed agents) and retry if so
    * Returns the gate type if retry was triggered, null otherwise
    */
-  private async checkAndRetryStuckGate(
-    projectId: string,
-    userId: string,
-  ): Promise<string | null> {
+  private async checkAndRetryStuckGate(projectId: string, userId: string): Promise<string | null> {
     // Find gates that are PENDING (work should be in progress)
     const pendingGates = await this.prisma.gate.findMany({
       where: {
@@ -2616,7 +2714,9 @@ This is an automatic checkpoint commit created after gate approval.`;
    * This is useful when agents fail due to transient errors (e.g., model not found)
    */
   async retryGateAgents(projectId: string, gateType: string, userId: string): Promise<void> {
-    console.log(`[WorkflowCoordinator] Retrying agents for gate ${gateType} on project ${projectId}`);
+    console.log(
+      `[WorkflowCoordinator] Retrying agents for gate ${gateType} on project ${projectId}`,
+    );
 
     // Verify project exists and user has access
     const project = await this.prisma.project.findUnique({
@@ -2634,5 +2734,4 @@ This is an automatic checkpoint commit created after gate approval.`;
     // Execute gate agents (this will start fresh agent executions)
     await this.executeGateAgents(projectId, gateType, userId);
   }
-
 }

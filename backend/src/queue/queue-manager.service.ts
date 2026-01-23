@@ -102,7 +102,7 @@ export class QueueManagerService {
    */
   private async calculatePriority(job: AgentJob): Promise<'critical' | 'high' | 'medium' | 'low'> {
     // 1. Orchestrator is always critical
-    if (job.agentType === 'orchestrator') {
+    if (job.agentType === 'ORCHESTRATOR') {
       return 'critical';
     }
 
@@ -120,10 +120,10 @@ export class QueueManagerService {
     if (project?.state?.currentGate) {
       // Gate-blocking agents get high priority
       const gateBlockingAgents = [
-        'product-manager', // G2
-        'architect', // G3
-        'qa-engineer', // G6
-        'security-engineer', // G7
+        'PRODUCT_MANAGER', // G2
+        'ARCHITECT', // G3
+        'QA_ENGINEER', // G6
+        'SECURITY_ENGINEER', // G7
       ];
 
       if (gateBlockingAgents.includes(job.agentType)) {
@@ -133,7 +133,7 @@ export class QueueManagerService {
 
     // 4. Code generation is medium priority
     if (
-      ['frontend-developer', 'backend-developer', 'ml-engineer', 'data-engineer'].includes(
+      ['FRONTEND_DEVELOPER', 'BACKEND_DEVELOPER', 'ML_ENGINEER', 'DATA_ENGINEER'].includes(
         job.agentType,
       )
     ) {

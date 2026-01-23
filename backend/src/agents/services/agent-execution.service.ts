@@ -790,11 +790,11 @@ ${template.prompt.context}
 
     // 2. Extract and write code files (NEW)
     const codeGenerationAgents = [
-      'frontend-developer',
-      'backend-developer',
-      'ml-engineer',
-      'data-engineer',
-      'devops-engineer',
+      'FRONTEND_DEVELOPER',
+      'BACKEND_DEVELOPER',
+      'ML_ENGINEER',
+      'DATA_ENGINEER',
+      'DEVOPS_ENGINEER',
     ];
 
     if (codeGenerationAgents.includes(agentType)) {
@@ -838,7 +838,7 @@ ${template.prompt.context}
 
           if (
             project?.state?.currentGate === 'G5_PENDING' &&
-            (agentType === 'frontend-developer' || agentType === 'backend-developer')
+            (agentType === 'FRONTEND_DEVELOPER' || agentType === 'BACKEND_DEVELOPER')
           ) {
             console.log(`[${agentType}] Running build validation for G5 gate...`);
 

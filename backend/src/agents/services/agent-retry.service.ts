@@ -290,10 +290,10 @@ Generate complete, working code files. No placeholders or TODOs.`;
 
     // Only auto-retry for code-generating agents
     const codeGenerationAgents = [
-      'frontend-developer',
-      'backend-developer',
-      'ml-engineer',
-      'data-engineer',
+      'FRONTEND_DEVELOPER',
+      'BACKEND_DEVELOPER',
+      'ML_ENGINEER',
+      'DATA_ENGINEER',
     ];
 
     if (!codeGenerationAgents.includes(agent.agentType)) {
@@ -313,7 +313,7 @@ Generate complete, working code files. No placeholders or TODOs.`;
           data: {
             projectId,
             fromAgent: agent.agentType,
-            toAgent: 'qa-engineer',
+            toAgent: 'QA_ENGINEER',
             phase: 'development',
             status: 'complete',
             notes: `Code generated and validated. ${retryResult.fixedErrors.length} errors fixed automatically.`,

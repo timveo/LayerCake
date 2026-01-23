@@ -149,7 +149,9 @@ export class AppWebSocketGateway implements OnGatewayConnection, OnGatewayDiscon
       timestamp: new Date().toISOString(),
     });
 
-    this.logger.log(`Agent completed: ${agentId} (${agentType || 'unknown'}) for project ${projectId}`);
+    this.logger.log(
+      `Agent completed: ${agentId} (${agentType || 'unknown'}) for project ${projectId}`,
+    );
   }
 
   emitAgentFailed(projectId: string, agentId: string, error: string) {
@@ -167,7 +169,12 @@ export class AppWebSocketGateway implements OnGatewayConnection, OnGatewayDiscon
    * Used for important system messages like gate approval requests
    * Also persists the message to ProjectEvent for history restoration
    */
-  emitChatMessage(projectId: string, messageId: string, content: string, role: 'assistant' | 'system' = 'assistant') {
+  emitChatMessage(
+    projectId: string,
+    messageId: string,
+    content: string,
+    role: 'assistant' | 'system' = 'assistant',
+  ) {
     const timestamp = new Date().toISOString();
 
     this.server.to(`project:${projectId}`).emit('chat:message', {
@@ -178,17 +185,19 @@ export class AppWebSocketGateway implements OnGatewayConnection, OnGatewayDiscon
     });
 
     // Persist to ProjectEvent for history restoration when returning to project
-    this.prisma.projectEvent.create({
-      data: {
-        id: messageId,
-        projectId,
-        eventType: 'ChatMessage',
-        eventData: { role, content },
-        metadata: { source: 'orchestrator' },
-      },
-    }).catch(err => {
-      this.logger.warn(`Failed to persist chat message ${messageId}: ${err.message}`);
-    });
+    this.prisma.projectEvent
+      .create({
+        data: {
+          id: messageId,
+          projectId,
+          eventType: 'ChatMessage',
+          eventData: { role, content },
+          metadata: { source: 'orchestrator' },
+        },
+      })
+      .catch((err) => {
+        this.logger.warn(`Failed to persist chat message ${messageId}: ${err.message}`);
+      });
 
     this.logger.log(`Chat message emitted for project ${projectId}: ${messageId}`);
   }

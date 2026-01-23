@@ -292,7 +292,9 @@ export class ToolEnabledAIProviderService {
       // Use the longest content from all iterations as the final output
       // This handles cases where the main document is produced in one iteration
       // and a brief summary/confirmation in another - we want the document
-      this.logger.log(`[Tool-Enabled] Total iterations: ${iterations}, content pieces: ${iterationContents.length}`);
+      this.logger.log(
+        `[Tool-Enabled] Total iterations: ${iterations}, content pieces: ${iterationContents.length}`,
+      );
       iterationContents.forEach((content, i) => {
         this.logger.log(`[Tool-Enabled] Iteration ${i + 1} content length: ${content.length}`);
       });

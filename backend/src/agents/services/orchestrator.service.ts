@@ -421,7 +421,7 @@ export class OrchestratorService {
 
   /**
    * Coordinate agent handoff with context
-   * Optimized: Uses createMany for bulk insert of deliverables (single query instead of N queries)
+   * Uses transaction to ensure handoff and deliverables are created atomically
    */
   async coordinateHandoff(
     projectId: string,
@@ -431,40 +431,41 @@ export class OrchestratorService {
     deliverables: string[],
     notes?: string,
   ): Promise<void> {
-    // Record handoff in database
-    const handoff = await this.prisma.handoff.create({
-      data: {
-        projectId,
-        fromAgent,
-        toAgent,
-        phase,
-        status: 'partial', // Use 'partial' until fully complete
-        notes: notes || `Handoff from ${fromAgent} to ${toAgent}`,
-      },
-    });
-
-    // Create handoff deliverables in bulk (single query)
-    if (deliverables.length > 0) {
-      const deliverablesData = deliverables.map((deliverable) => ({
-        handoffId: handoff.id,
-        deliverable,
-      }));
-
-      await this.prisma.handoffDeliverable.createMany({
-        data: deliverablesData,
+    // Use transaction to ensure handoff and deliverables are created atomically
+    await this.prisma.$transaction(async (tx) => {
+      // Record handoff in database
+      const handoff = await tx.handoff.create({
+        data: {
+          projectId,
+          fromAgent,
+          toAgent,
+          phase,
+          status: 'partial', // Use 'partial' until fully complete
+          notes: notes || `Handoff from ${fromAgent} to ${toAgent}`,
+        },
       });
-    }
 
-    // Update task status for target agent
-    await this.prisma.task.updateMany({
-      where: {
-        projectId,
-        owner: toAgent,
-        status: 'not_started',
-      },
-      data: {
-        status: 'not_started', // Keep as not_started until explicitly picked up
-      },
+      // Create handoff deliverables in bulk (single query)
+      if (deliverables.length > 0) {
+        await tx.handoffDeliverable.createMany({
+          data: deliverables.map((deliverable) => ({
+            handoffId: handoff.id,
+            deliverable,
+          })),
+        });
+      }
+
+      // Update task status for target agent
+      await tx.task.updateMany({
+        where: {
+          projectId,
+          owner: toAgent,
+          status: 'not_started',
+        },
+        data: {
+          status: 'not_started', // Keep as not_started until explicitly picked up
+        },
+      });
     });
   }
 

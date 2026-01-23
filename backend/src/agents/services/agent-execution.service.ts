@@ -142,26 +142,30 @@ export class AgentExecutionService {
       ...(executeDto.context || {}), // Merge in any additional context (e.g., userMessage)
     };
 
-    // Create agent execution record
-    const agentExecution = await this.prisma.agent.create({
-      data: {
-        projectId: executeDto.projectId,
-        agentType: executeDto.agentType,
-        status: 'RUNNING',
-        inputPrompt: executeDto.userPrompt,
-        model: executeDto.model || template.defaultModel,
-        contextData: context as any,
-      },
-    });
-
-    // Increment user's monthly execution count
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        monthlyAgentExecutions: {
-          increment: 1,
+    // Create agent execution record and increment user's monthly execution count atomically
+    // This ensures billing consistency - either both succeed or neither does
+    const agentExecution = await this.prisma.$transaction(async (tx) => {
+      const agent = await tx.agent.create({
+        data: {
+          projectId: executeDto.projectId,
+          agentType: executeDto.agentType,
+          status: 'RUNNING',
+          inputPrompt: executeDto.userPrompt,
+          model: executeDto.model || template.defaultModel,
+          contextData: context as any,
         },
-      },
+      });
+
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          monthlyAgentExecutions: {
+            increment: 1,
+          },
+        },
+      });
+
+      return agent;
     });
 
     try {
@@ -1111,40 +1115,31 @@ ${template.prompt.context}
         // Create handoff record for each next agent
         for (const nextAgent of handoffData.nextAgent) {
           try {
-            await this.prisma.handoff.create({
-              data: {
-                projectId,
-                fromAgent: agentType,
-                toAgent: nextAgent,
-                phase: project.state.currentPhase,
-                status: 'partial',
-                notes: handoffData.nextAction || 'Agent handoff',
-              },
-            });
-            result.handoffsCreated.push(`${agentType} -> ${nextAgent}`);
-
-            // Create handoff deliverables
-            if (handoffData.deliverables?.length > 0) {
-              const handoff = await this.prisma.handoff.findFirst({
-                where: {
+            // Use transaction to ensure handoff and deliverables are created atomically
+            await this.prisma.$transaction(async (tx) => {
+              const handoff = await tx.handoff.create({
+                data: {
                   projectId,
                   fromAgent: agentType,
                   toAgent: nextAgent,
+                  phase: project.state.currentPhase,
+                  status: 'partial',
+                  notes: handoffData.nextAction || 'Agent handoff',
                 },
-                orderBy: { createdAt: 'desc' },
               });
 
-              if (handoff) {
-                for (const deliverable of handoffData.deliverables) {
-                  await this.prisma.handoffDeliverable.create({
-                    data: {
-                      handoffId: handoff.id,
-                      deliverable,
-                    },
-                  });
-                }
+              // Create handoff deliverables using the handoff ID directly
+              if (handoffData.deliverables?.length > 0) {
+                await tx.handoffDeliverable.createMany({
+                  data: handoffData.deliverables.map((deliverable) => ({
+                    handoffId: handoff.id,
+                    deliverable,
+                  })),
+                });
               }
-            }
+            });
+
+            result.handoffsCreated.push(`${agentType} -> ${nextAgent}`);
           } catch (error) {
             // Handoff failures are critical - they break the workflow
             addError(

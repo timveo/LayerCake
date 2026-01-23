@@ -294,6 +294,14 @@ export class McpToolsService {
       const docs = await this.prisma.document.findMany({
         where: { projectId: args.projectId },
         orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true,
+          title: true,
+          content: true,
+          documentType: true,
+          updatedAt: true,
+        },
+        take: 50,
       });
       // Filter by query relevance
       const relevantDocs = docs.filter(
@@ -701,6 +709,7 @@ export class McpToolsService {
     const gates = await this.prisma.gate.findMany({
       where: { projectId: args.projectId },
       orderBy: { createdAt: 'asc' },
+      take: 20,
     });
     return gates;
   }
@@ -718,6 +727,7 @@ export class McpToolsService {
   private async getGateArtifacts(args: { gateId: string }): Promise<any> {
     const artifacts = await this.prisma.proofArtifact.findMany({
       where: { gateId: args.gateId },
+      take: 100,
     });
     return artifacts;
   }
@@ -740,6 +750,7 @@ export class McpToolsService {
     const documents = await this.prisma.document.findMany({
       where: { projectId: args.projectId },
       orderBy: { createdAt: 'desc' },
+      take: 100,
     });
     return documents;
   }
@@ -920,6 +931,7 @@ export class McpToolsService {
     const tasks = await this.prisma.task.findMany({
       where: { projectId: args.projectId },
       orderBy: { createdAt: 'desc' },
+      take: 100,
     });
     return tasks;
   }

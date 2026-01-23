@@ -818,6 +818,7 @@ ${template.prompt.context}
     return await this.prisma.agent.findMany({
       where: { projectId },
       orderBy: { createdAt: 'asc' }, // Oldest first for conversation history
+      take: 100,
     });
   }
 

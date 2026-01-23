@@ -205,6 +205,7 @@ export class JourneyService {
         },
       },
       orderBy: { createdAt: 'asc' },
+      take: 20,
     });
 
     // Get all tasks for the project
@@ -216,6 +217,7 @@ export class JourneyService {
         status: true,
         phase: true,
       },
+      take: 100,
     });
 
     // Get all decisions for the project
@@ -228,6 +230,7 @@ export class JourneyService {
         description: true,
         rationale: true,
       },
+      take: 200,
     });
 
     // Get all documents for the project
@@ -240,6 +243,7 @@ export class JourneyService {
         documentType: true,
         gateId: true,
       },
+      take: 100,
     });
 
     // Determine current gate from project state

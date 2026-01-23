@@ -73,6 +73,13 @@ export class CostTrackingService {
     // Get all agent executions for the project
     const allAgents = await this.prisma.agent.findMany({
       where: { projectId },
+      select: {
+        agentType: true,
+        model: true,
+        inputTokens: true,
+        outputTokens: true,
+      },
+      take: 1000,
     });
 
     const costsByGate = [];
@@ -138,6 +145,7 @@ export class CostTrackingService {
         inputTokens: true,
         outputTokens: true,
       },
+      take: 1000,
     });
 
     let totalCost = 0;

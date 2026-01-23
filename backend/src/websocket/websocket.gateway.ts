@@ -154,6 +154,44 @@ export class AppWebSocketGateway implements OnGatewayConnection, OnGatewayDiscon
     );
   }
 
+  /**
+   * Emit agent completed with warnings - used when post-processing partially failed
+   * The agent execution succeeded but some deliverables may be missing
+   */
+  emitAgentCompletedWithWarnings(
+    projectId: string,
+    agentId: string,
+    result: any,
+    warnings: Array<{ operation: string; message: string; severity: string }>,
+    agentType?: string,
+  ) {
+    this.server.to(`project:${projectId}`).emit('agent:completed_with_warnings', {
+      agentId,
+      agentType,
+      result,
+      warnings,
+      timestamp: new Date().toISOString(),
+    });
+
+    this.logger.warn(
+      `Agent completed with warnings: ${agentId} (${agentType || 'unknown'}) for project ${projectId} - ${warnings.length} warning(s)`,
+    );
+
+    // Also emit a notification for critical warnings
+    const criticalWarnings = warnings.filter((w) => w.severity === 'critical');
+    if (criticalWarnings.length > 0) {
+      const warningMessages = criticalWarnings
+        .map((w) => `${w.operation}: ${w.message}`)
+        .join('; ');
+      this.server.to(`project:${projectId}`).emit('notification', {
+        type: 'warning',
+        title: 'Agent Completed with Issues',
+        message: `Some operations failed: ${warningMessages}`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
   emitAgentFailed(projectId: string, agentId: string, error: string) {
     this.server.to(`project:${projectId}`).emit('agent:failed', {
       agentId,

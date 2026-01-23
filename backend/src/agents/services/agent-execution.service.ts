@@ -13,6 +13,8 @@ import { ToolEnabledAIProviderService } from './tool-enabled-ai-provider.service
 import {
   AgentExecutionContext,
   AgentExecutionResult,
+  PostProcessingResult,
+  PostProcessingError,
 } from '../interfaces/agent-template.interface';
 import { ExecuteAgentDto } from '../dto/execute-agent.dto';
 import { getAgentTemplate } from '../templates';
@@ -23,6 +25,7 @@ import { BuildExecutorService } from '../../code-generation/build-executor.servi
 import { AgentRetryService } from './agent-retry.service';
 import { CostTrackingService } from '../../cost-tracking/cost-tracking.service';
 import { AgentMemoryService } from '../../agent-memory/agent-memory.service';
+import { AppWebSocketGateway } from '../../websocket/websocket.gateway';
 
 /**
  * Teaching level instructions for Phase 5
@@ -73,6 +76,7 @@ export class AgentExecutionService {
     private retryService: AgentRetryService,
     private costTracking: CostTrackingService,
     private agentMemory: AgentMemoryService,
+    private wsGateway: AppWebSocketGateway,
   ) {}
 
   async executeAgent(executeDto: ExecuteAgentDto, userId: string): Promise<AgentExecutionResult> {
@@ -368,7 +372,7 @@ export class AgentExecutionService {
               },
             });
 
-            // Track cost and update COST_LOG document
+            // Track cost and update COST_LOG document (non-critical)
             try {
               const currentGate = context.currentGate || 'G1_PENDING';
               const model = executeDto.model || template.defaultModel;
@@ -380,15 +384,14 @@ export class AgentExecutionService {
                 response.usage.inputTokens,
                 response.usage.outputTokens,
               );
-              console.log(
+              this.logger.log(
                 `[CostTracking] ${executeDto.agentType} cost: $${costResult.cost.toFixed(4)}, total: $${costResult.totalProjectCost.toFixed(4)}`,
               );
             } catch (error) {
-              console.error('Cost tracking error:', error);
-              // Don't fail execution if cost tracking fails
+              this.logger.warn('Cost tracking failed (non-critical):', error);
             }
 
-            // Update Agent Log document
+            // Update Agent Log document (non-critical)
             try {
               await this.updateAgentLogDocument(
                 executeDto.projectId,
@@ -397,10 +400,10 @@ export class AgentExecutionService {
                 'Complete',
               );
             } catch (error) {
-              console.error('Agent log update error:', error);
+              this.logger.warn('Agent log update failed (non-critical):', error);
             }
 
-            // Save full agent memory for context recovery
+            // Save full agent memory for context recovery (non-critical)
             try {
               await this.agentMemory.saveAgentMemory({
                 projectId: executeDto.projectId,
@@ -415,24 +418,63 @@ export class AgentExecutionService {
                 inputTokens: response.usage.inputTokens,
                 outputTokens: response.usage.outputTokens,
               });
-              console.log(`[AgentMemory] Saved memory for ${executeDto.agentType}`);
+              this.logger.log(`[AgentMemory] Saved memory for ${executeDto.agentType}`);
             } catch (error) {
-              console.error('Agent memory save error:', error);
-              // Don't fail execution if memory save fails
+              this.logger.warn('Agent memory save failed (non-critical):', error);
             }
 
-            // Post-processing: Generate documents and handle handoffs
-            try {
-              await this.postProcessAgentCompletion(
-                executionId,
+            // Post-processing: Generate documents and handle handoffs (critical - report failures)
+            const postProcessResult = await this.postProcessAgentCompletion(
+              executionId,
+              executeDto.projectId,
+              executeDto.agentType,
+              response.content,
+              userId,
+            );
+
+            // If there were critical errors or warnings, emit via WebSocket
+            if (
+              postProcessResult.criticalErrors.length > 0 ||
+              postProcessResult.warnings.length > 0
+            ) {
+              const allWarnings = [
+                ...postProcessResult.criticalErrors,
+                ...postProcessResult.warnings,
+              ];
+
+              // Store warning info in contextData
+              const currentAgent = await this.prisma.agent.findUnique({
+                where: { id: executionId },
+                select: { contextData: true },
+              });
+              await this.prisma.agent.update({
+                where: { id: executionId },
+                data: {
+                  contextData: {
+                    ...((currentAgent?.contextData as object) || {}),
+                    postProcessingErrors: allWarnings,
+                    postProcessingResult: {
+                      documentsCreated: postProcessResult.documentsCreated,
+                      filesWritten: postProcessResult.filesWritten,
+                      handoffsCreated: postProcessResult.handoffsCreated,
+                    },
+                    hasPostProcessingWarnings: true,
+                  } as any,
+                },
+              });
+
+              // Emit warning event via WebSocket so frontend can show user what failed
+              this.wsGateway.emitAgentCompletedWithWarnings(
                 executeDto.projectId,
+                executionId,
+                response,
+                allWarnings.map((e) => ({
+                  operation: e.operation,
+                  message: e.message,
+                  severity: e.severity,
+                })),
                 executeDto.agentType,
-                response.content,
-                userId,
               );
-            } catch (error) {
-              console.error('Post-processing error:', error);
-              // Don't fail the entire execution if post-processing fails
             }
 
             streamCallback.onComplete(response);
@@ -493,7 +535,7 @@ export class AgentExecutionService {
       },
     });
 
-    // Track cost and update COST_LOG document
+    // Track cost and update COST_LOG document (non-critical)
     try {
       const currentGate = context.currentGate || 'G1_PENDING';
       const model = executeDto.model || template.defaultModel;
@@ -509,10 +551,10 @@ export class AgentExecutionService {
         `[CostTracking] ${executeDto.agentType} cost: $${costResult.cost.toFixed(4)}, total: $${costResult.totalProjectCost.toFixed(4)}`,
       );
     } catch (error) {
-      this.logger.error('Cost tracking error:', error);
+      this.logger.warn('Cost tracking failed (non-critical):', error);
     }
 
-    // Update Agent Log document
+    // Update Agent Log document (non-critical)
     try {
       await this.updateAgentLogDocument(
         executeDto.projectId,
@@ -521,10 +563,10 @@ export class AgentExecutionService {
         'Complete',
       );
     } catch (error) {
-      this.logger.error('Agent log update error:', error);
+      this.logger.warn('Agent log update failed (non-critical):', error);
     }
 
-    // Save full agent memory for context recovery
+    // Save full agent memory for context recovery (non-critical)
     try {
       await this.agentMemory.saveAgentMemory({
         projectId: executeDto.projectId,
@@ -541,23 +583,62 @@ export class AgentExecutionService {
       });
       this.logger.log(`[AgentMemory] Saved memory for ${executeDto.agentType}`);
     } catch (error) {
-      this.logger.error('Agent memory save error:', error);
+      this.logger.warn('Agent memory save failed (non-critical):', error);
     }
 
-    // Post-processing: Generate documents and handle handoffs
-    try {
-      await this.postProcessAgentCompletion(
-        executionId,
+    // Post-processing: Generate documents and handle handoffs (critical - report failures)
+    const postProcessResult = await this.postProcessAgentCompletion(
+      executionId,
+      executeDto.projectId,
+      executeDto.agentType,
+      response.content,
+      userId,
+    );
+
+    // If there were critical errors or warnings, emit via WebSocket
+    if (postProcessResult.criticalErrors.length > 0 || postProcessResult.warnings.length > 0) {
+      const allWarnings = [...postProcessResult.criticalErrors, ...postProcessResult.warnings];
+
+      // Store warning info in contextData (status stays COMPLETED since schema doesn't have COMPLETED_WITH_ERRORS)
+      const currentAgent = await this.prisma.agent.findUnique({
+        where: { id: executionId },
+        select: { contextData: true },
+      });
+      await this.prisma.agent.update({
+        where: { id: executionId },
+        data: {
+          contextData: {
+            ...((currentAgent?.contextData as object) || {}),
+            postProcessingErrors: allWarnings,
+            postProcessingResult: {
+              documentsCreated: postProcessResult.documentsCreated,
+              filesWritten: postProcessResult.filesWritten,
+              handoffsCreated: postProcessResult.handoffsCreated,
+            },
+            hasPostProcessingWarnings: true,
+          } as any,
+        },
+      });
+
+      // Emit warning event via WebSocket so frontend can show user what failed
+      this.wsGateway.emitAgentCompletedWithWarnings(
         executeDto.projectId,
+        executionId,
+        response,
+        allWarnings.map((e) => ({
+          operation: e.operation,
+          message: e.message,
+          severity: e.severity,
+        })),
         executeDto.agentType,
-        response.content,
-        userId,
       );
-    } catch (error) {
-      this.logger.error('Post-processing error:', error);
-    }
 
-    streamCallback.onComplete(response);
+      // Also call the normal completion callback so streaming completes
+      streamCallback.onComplete(response);
+    } else {
+      // No issues - emit normal completion
+      streamCallback.onComplete(response);
+    }
   }
 
   /**
@@ -757,6 +838,7 @@ ${template.prompt.context}
 
   /**
    * Post-process agent completion: Generate documents, extract code files, and prepare handoffs
+   * Returns a result object indicating what succeeded and what failed
    */
   private async postProcessAgentCompletion(
     agentExecutionId: string,
@@ -764,7 +846,36 @@ ${template.prompt.context}
     agentType: string,
     agentOutput: string,
     userId: string,
-  ): Promise<void> {
+  ): Promise<PostProcessingResult> {
+    const result: PostProcessingResult = {
+      success: true,
+      documentsCreated: [],
+      filesWritten: [],
+      handoffsCreated: [],
+      tasksUpdated: 0,
+      deliverablesCompleted: 0,
+      errors: [],
+      criticalErrors: [],
+      warnings: [],
+    };
+
+    const addError = (
+      operation: string,
+      message: string,
+      severity: 'critical' | 'warning' | 'info',
+      details?: Record<string, unknown>,
+    ) => {
+      const error: PostProcessingError = { operation, message, severity, details };
+      result.errors.push(error);
+      if (severity === 'critical') {
+        result.criticalErrors.push(error);
+        result.success = false;
+      } else if (severity === 'warning') {
+        result.warnings.push(error);
+      }
+      this.logger.error(`[PostProcess:${severity}] ${operation}: ${message}`);
+    };
+
     // 1. Generate documents from agent output
     // Skip for agents that have custom document handling in workflow-coordinator
     // to prevent duplicate document creation
@@ -776,19 +887,30 @@ ${template.prompt.context}
 
     if (!agentsWithCustomDocHandling.includes(agentType)) {
       try {
-        await this.documentsService.generateFromAgentOutput(
+        const docs = await this.documentsService.generateFromAgentOutput(
           projectId,
           agentExecutionId,
           agentType,
           agentOutput,
           userId,
         );
+        if (docs && Array.isArray(docs)) {
+          result.documentsCreated = docs.map((d) => d.title || d.id);
+        }
       } catch (error) {
-        console.error('Document generation error:', error);
+        // Document generation is critical for agents that should produce docs
+        const docProducingAgents = ['ARCHITECT', 'PRODUCT_MANAGER', 'SECURITY_ENGINEER'];
+        const severity = docProducingAgents.includes(agentType) ? 'critical' : 'warning';
+        addError(
+          'Document Generation',
+          error.message || 'Failed to generate documents from agent output',
+          severity,
+          { agentType },
+        );
       }
     }
 
-    // 2. Extract and write code files (NEW)
+    // 2. Extract and write code files
     const codeGenerationAgents = [
       'FRONTEND_DEVELOPER',
       'BACKEND_DEVELOPER',
@@ -803,15 +925,25 @@ ${template.prompt.context}
         const extractionResult = this.codeParser.extractFiles(agentOutput);
 
         if (extractionResult.files.length > 0) {
-          console.log(`[${agentType}] Extracted ${extractionResult.files.length} code files`);
+          this.logger.log(`[${agentType}] Extracted ${extractionResult.files.length} code files`);
 
           // Ensure project workspace exists
           await this.filesystem.createProjectWorkspace(projectId);
 
           // Write all extracted files
           for (const file of extractionResult.files) {
-            await this.filesystem.writeFile(projectId, file.path, file.content);
-            console.log(`[${agentType}] Wrote file: ${file.path}`);
+            try {
+              await this.filesystem.writeFile(projectId, file.path, file.content);
+              result.filesWritten.push(file.path);
+              this.logger.log(`[${agentType}] Wrote file: ${file.path}`);
+            } catch (fileError) {
+              addError(
+                'File Write',
+                `Failed to write file ${file.path}: ${fileError.message}`,
+                'critical',
+                { filePath: file.path },
+              );
+            }
           }
 
           // Record extracted files in agent execution metadata
@@ -825,7 +957,7 @@ ${template.prompt.context}
             data: {
               contextData: {
                 ...(typeof currentContextData === 'object' ? currentContextData : {}),
-                filesGenerated: extractionResult.files.map((f) => f.path),
+                filesGenerated: result.filesWritten,
               } as any,
             },
           });
@@ -840,7 +972,7 @@ ${template.prompt.context}
             project?.state?.currentGate === 'G5_PENDING' &&
             (agentType === 'FRONTEND_DEVELOPER' || agentType === 'BACKEND_DEVELOPER')
           ) {
-            console.log(`[${agentType}] Running build validation for G5 gate...`);
+            this.logger.log(`[${agentType}] Running build validation for G5 gate...`);
 
             try {
               // Run full validation pipeline
@@ -861,7 +993,7 @@ ${template.prompt.context}
                 },
               });
 
-              console.log(
+              this.logger.log(
                 `[${agentType}] Validation ${validationResult.overallSuccess ? 'PASSED' : 'FAILED'}`,
               );
 
@@ -890,7 +1022,9 @@ ${template.prompt.context}
                 }
 
                 // Trigger automatic self-healing retry
-                console.log(`[${agentType}] Build validation failed. Triggering self-healing...`);
+                this.logger.log(
+                  `[${agentType}] Build validation failed. Triggering self-healing...`,
+                );
 
                 try {
                   const healingSuccess = await this.retryService.autoRetryOnBuildFailure(
@@ -900,25 +1034,59 @@ ${template.prompt.context}
                   );
 
                   if (healingSuccess) {
-                    console.log(`[${agentType}] Self-healing succeeded. Code is now valid.`);
+                    this.logger.log(`[${agentType}] Self-healing succeeded. Code is now valid.`);
                   } else {
-                    console.log(`[${agentType}] Self-healing failed. Human intervention required.`);
+                    this.logger.log(
+                      `[${agentType}] Self-healing failed. Human intervention required.`,
+                    );
+                    addError(
+                      'Build Validation',
+                      'Build validation failed and self-healing was unsuccessful',
+                      'warning',
+                      { errors: errors.slice(0, 3) },
+                    );
                   }
                 } catch (retryError) {
-                  console.error('Self-healing error:', retryError);
+                  addError(
+                    'Self-Healing',
+                    retryError.message || 'Self-healing process failed',
+                    'warning',
+                    { originalErrors: errors.slice(0, 3) },
+                  );
                 }
               }
             } catch (error) {
-              console.error('Build validation error:', error);
+              addError(
+                'Build Validation',
+                error.message || 'Failed to run build validation',
+                'warning',
+                { gate: 'G5_PENDING' },
+              );
             }
           }
         } else {
-          console.log(
-            `[${agentType}] No code files extracted from output (${extractionResult.unparsedBlocks} unparsed blocks)`,
+          const unparsedCount = extractionResult.unparsedBlocks?.length || 0;
+          this.logger.log(
+            `[${agentType}] No code files extracted from output (${unparsedCount} unparsed blocks)`,
           );
+          // This is a warning for code generation agents - they should produce code
+          if (unparsedCount > 0) {
+            addError(
+              'Code Extraction',
+              `No valid code files extracted (${unparsedCount} unparsed code blocks found)`,
+              'warning',
+              { unparsedBlocks: unparsedCount },
+            );
+          }
         }
       } catch (error) {
-        console.error('Code extraction error:', error);
+        // Code extraction failure is critical for code generation agents
+        addError(
+          'Code Extraction',
+          error.message || 'Failed to extract code files from agent output',
+          'critical',
+          { agentType },
+        );
       }
     }
 
@@ -933,54 +1101,66 @@ ${template.prompt.context}
       });
 
       if (!project || !project.state) {
-        return;
-      }
-
-      // Create handoff record for each next agent
-      for (const nextAgent of handoffData.nextAgent) {
-        try {
-          await this.prisma.handoff.create({
-            data: {
-              projectId,
-              fromAgent: agentType,
-              toAgent: nextAgent,
-              phase: project.state.currentPhase,
-              status: 'partial',
-              notes: handoffData.nextAction || 'Agent handoff',
-            },
-          });
-
-          // Create handoff deliverables
-          if (handoffData.deliverables?.length > 0) {
-            const handoff = await this.prisma.handoff.findFirst({
-              where: {
+        addError(
+          'Handoff Creation',
+          'Could not find project state for handoff creation',
+          'warning',
+          { projectId },
+        );
+      } else {
+        // Create handoff record for each next agent
+        for (const nextAgent of handoffData.nextAgent) {
+          try {
+            await this.prisma.handoff.create({
+              data: {
                 projectId,
                 fromAgent: agentType,
                 toAgent: nextAgent,
+                phase: project.state.currentPhase,
+                status: 'partial',
+                notes: handoffData.nextAction || 'Agent handoff',
               },
-              orderBy: { createdAt: 'desc' },
             });
+            result.handoffsCreated.push(`${agentType} -> ${nextAgent}`);
 
-            if (handoff) {
-              for (const deliverable of handoffData.deliverables) {
-                await this.prisma.handoffDeliverable.create({
-                  data: {
-                    handoffId: handoff.id,
-                    deliverable,
-                  },
-                });
+            // Create handoff deliverables
+            if (handoffData.deliverables?.length > 0) {
+              const handoff = await this.prisma.handoff.findFirst({
+                where: {
+                  projectId,
+                  fromAgent: agentType,
+                  toAgent: nextAgent,
+                },
+                orderBy: { createdAt: 'desc' },
+              });
+
+              if (handoff) {
+                for (const deliverable of handoffData.deliverables) {
+                  await this.prisma.handoffDeliverable.create({
+                    data: {
+                      handoffId: handoff.id,
+                      deliverable,
+                    },
+                  });
+                }
               }
             }
+          } catch (error) {
+            // Handoff failures are critical - they break the workflow
+            addError(
+              'Handoff Creation',
+              `Failed to create handoff to ${nextAgent}: ${error.message}`,
+              'critical',
+              { fromAgent: agentType, toAgent: nextAgent },
+            );
           }
-        } catch (error) {
-          console.error('Handoff creation error:', error);
         }
       }
     }
 
     // 4. Update task status if this agent was assigned a task
     try {
-      await this.prisma.task.updateMany({
+      const taskResult = await this.prisma.task.updateMany({
         where: {
           projectId,
           owner: agentType,
@@ -991,13 +1171,17 @@ ${template.prompt.context}
           completedAt: new Date(),
         },
       });
+      result.tasksUpdated = taskResult.count;
     } catch (error) {
-      console.error('Task update error:', error);
+      // Task updates are non-critical
+      addError('Task Update', error.message || 'Failed to update task status', 'info', {
+        agentType,
+      });
     }
 
     // 5. Mark agent's deliverables as complete
     try {
-      const result = await this.prisma.deliverable.updateMany({
+      const deliverableResult = await this.prisma.deliverable.updateMany({
         where: {
           projectId,
           owner: agentType,
@@ -1007,13 +1191,24 @@ ${template.prompt.context}
           status: 'complete',
         },
       });
+      result.deliverablesCompleted = deliverableResult.count;
 
-      if (result.count > 0) {
-        console.log(`[${agentType}] Marked ${result.count} deliverable(s) as complete`);
+      if (deliverableResult.count > 0) {
+        this.logger.log(
+          `[${agentType}] Marked ${deliverableResult.count} deliverable(s) as complete`,
+        );
       }
     } catch (error) {
-      console.error('Deliverable update error:', error);
+      // Deliverable updates are non-critical
+      addError(
+        'Deliverable Update',
+        error.message || 'Failed to update deliverable status',
+        'info',
+        { agentType },
+      );
     }
+
+    return result;
   }
 
   /**

@@ -40,3 +40,39 @@ export interface AgentExecutionResult {
   gateReady?: boolean;
   errors?: string[];
 }
+
+/**
+ * Severity levels for post-processing errors
+ * - critical: User must be notified, deliverables may be missing
+ * - warning: User should be informed, but execution succeeded
+ * - info: Non-critical, logged for debugging
+ */
+export type PostProcessingErrorSeverity = 'critical' | 'warning' | 'info';
+
+/**
+ * Individual post-processing error with context
+ */
+export interface PostProcessingError {
+  operation: string;
+  message: string;
+  severity: PostProcessingErrorSeverity;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * Result of post-processing agent completion
+ * Tracks what succeeded and what failed so callers can surface warnings to users
+ */
+export interface PostProcessingResult {
+  success: boolean;
+  documentsCreated: string[];
+  filesWritten: string[];
+  handoffsCreated: string[];
+  tasksUpdated: number;
+  deliverablesCompleted: number;
+  errors: PostProcessingError[];
+  /** Errors that should be surfaced to the user */
+  criticalErrors: PostProcessingError[];
+  /** Errors that are informational only */
+  warnings: PostProcessingError[];
+}

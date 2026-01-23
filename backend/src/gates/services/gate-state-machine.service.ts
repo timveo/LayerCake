@@ -1,6 +1,10 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import { getGateConfig, getDeliverablesForGate } from '../gate-config';
+
+// Transaction client type for passing to helper methods
+type TransactionClient = Prisma.TransactionClient;
 
 // Gate progression order (G1-G9, no G0)
 const GATE_PROGRESSION = [
@@ -251,6 +255,8 @@ export class GateStateMachineService {
 
   /**
    * Approve a gate and create next gate
+   * All operations are wrapped in a transaction to ensure data consistency.
+   * If any step fails, all changes are rolled back.
    */
   async approveGate(
     projectId: string,
@@ -259,19 +265,19 @@ export class GateStateMachineService {
     approvalResponse: string,
     reviewNotes?: string,
   ): Promise<{ success: boolean; nextGate?: string }> {
-    // Validate approval response
+    // Validate approval response (outside transaction - no DB writes)
     const validation = this.validateApprovalResponse(approvalResponse);
     if (!validation.isValid) {
       throw new BadRequestException(validation.reason);
     }
 
-    // Check if can transition
+    // Check if can transition (outside transaction - read-only checks)
     const canTransition = await this.canTransitionGate(projectId, gateType, userId);
     if (!canTransition.canTransition) {
       throw new ForbiddenException(canTransition.reason);
     }
 
-    // Get the gate
+    // Get the gate (outside transaction - needed for validation)
     const gate = await this.prisma.gate.findFirst({
       where: { projectId, gateType },
     });
@@ -280,67 +286,70 @@ export class GateStateMachineService {
       throw new BadRequestException(`Gate ${gateType} not found`);
     }
 
-    // Approve the gate
-    await this.prisma.gate.update({
-      where: { id: gate.id },
-      data: {
-        status: 'APPROVED',
-        approvedById: userId,
-        approvedAt: new Date(),
-        reviewNotes,
-      },
+    // Wrap all write operations in a transaction for data consistency
+    return this.prisma.$transaction(async (tx) => {
+      // Approve the gate
+      await tx.gate.update({
+        where: { id: gate.id },
+        data: {
+          status: 'APPROVED',
+          approvedById: userId,
+          approvedAt: new Date(),
+          reviewNotes,
+        },
+      });
+
+      // Lock documents if applicable
+      await this.lockDocumentsForGate(projectId, gateType, tx);
+
+      // Create next gate and update project state to point to it
+      const nextGateType = this.getNextGateType(gateType);
+      if (nextGateType) {
+        await this.createNextGate(projectId, nextGateType, tx);
+
+        // Update project state to the next gate (not the approved one)
+        await tx.project.update({
+          where: { id: projectId },
+          data: {
+            state: {
+              update: {
+                currentGate: nextGateType,
+              },
+            },
+          },
+        });
+
+        return { success: true, nextGate: nextGateType };
+      } else {
+        // No next gate - update to the approved gate
+        await tx.project.update({
+          where: { id: projectId },
+          data: {
+            state: {
+              update: {
+                currentGate: gateType,
+              },
+            },
+          },
+        });
+      }
+
+      // Mark project as complete if this was G9_COMPLETE
+      if (gateType === 'G9_COMPLETE') {
+        await tx.project.update({
+          where: { id: projectId },
+          data: {
+            state: {
+              update: {
+                currentGate: 'PROJECT_COMPLETE',
+              },
+            },
+          },
+        });
+      }
+
+      return { success: true };
     });
-
-    // Lock documents if applicable
-    await this.lockDocumentsForGate(projectId, gateType);
-
-    // Create next gate and update project state to point to it
-    const nextGateType = this.getNextGateType(gateType);
-    if (nextGateType) {
-      await this.createNextGate(projectId, nextGateType);
-
-      // Update project state to the next gate (not the approved one)
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: {
-          state: {
-            update: {
-              currentGate: nextGateType,
-            },
-          },
-        },
-      });
-
-      return { success: true, nextGate: nextGateType };
-    } else {
-      // No next gate - update to the approved gate
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: {
-          state: {
-            update: {
-              currentGate: gateType,
-            },
-          },
-        },
-      });
-    }
-
-    // Mark project as complete if this was G9_COMPLETE
-    if (gateType === 'G9_COMPLETE') {
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: {
-          state: {
-            update: {
-              currentGate: 'PROJECT_COMPLETE',
-            },
-          },
-        },
-      });
-    }
-
-    return { success: true };
   }
 
   /**
@@ -388,10 +397,19 @@ export class GateStateMachineService {
 
   /**
    * Create next gate in progression with deliverables
+   * @param projectId - The project ID
+   * @param gateType - The gate type to create
+   * @param tx - Optional transaction client for atomic operations
    */
-  private async createNextGate(projectId: string, gateType: string): Promise<void> {
+  private async createNextGate(
+    projectId: string,
+    gateType: string,
+    tx?: TransactionClient,
+  ): Promise<void> {
+    const db = tx || this.prisma;
+
     // Get project type for project-specific configuration
-    const project = await this.prisma.project.findUnique({
+    const project = await db.project.findUnique({
       where: { id: projectId },
       select: { type: true },
     });
@@ -407,7 +425,7 @@ export class GateStateMachineService {
     const initialStatus = isCompleteGate ? 'APPROVED' : 'PENDING';
 
     // Create the gate
-    await this.prisma.gate.create({
+    await db.gate.create({
       data: {
         projectId,
         gateType,
@@ -422,7 +440,7 @@ export class GateStateMachineService {
     // Create deliverables for this gate
     const deliverables = getDeliverablesForGate(projectType, gateType);
     if (deliverables.length > 0) {
-      await this.prisma.deliverable.createMany({
+      await db.deliverable.createMany({
         data: deliverables.map((d) => ({
           projectId,
           name: d.name,
@@ -441,11 +459,19 @@ export class GateStateMachineService {
 
   /**
    * Lock documents when gate is approved (for future implementation)
+   * @param _projectId - The project ID
+   * @param _gateType - The gate type
+   * @param _tx - Optional transaction client for atomic operations
    */
-  private async lockDocumentsForGate(_projectId: string, _gateType: string): Promise<void> {
+  private async lockDocumentsForGate(
+    _projectId: string,
+    _gateType: string,
+    _tx?: TransactionClient,
+  ): Promise<void> {
     // TODO: Add document locking when schema supports it
     // Documents and specifications will be locked after gate approval
     // to prevent modifications without re-approval
+    // When implemented, use: const db = _tx || this.prisma;
   }
 
   /**

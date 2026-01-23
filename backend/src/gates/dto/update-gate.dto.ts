@@ -1,13 +1,5 @@
-import { IsString, IsEnum, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsBoolean } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-
-export enum GateStatus {
-  PENDING = 'PENDING',
-  IN_REVIEW = 'IN_REVIEW',
-  APPROVED = 'APPROVED',
-  REJECTED = 'REJECTED',
-  BLOCKED = 'BLOCKED',
-}
 
 export class UpdateGateDto {
   @ApiPropertyOptional({ description: 'Gate description/requirements' })
@@ -19,11 +11,6 @@ export class UpdateGateDto {
   @IsOptional()
   @IsString()
   passingCriteria?: string;
-
-  @ApiPropertyOptional({ enum: GateStatus })
-  @IsOptional()
-  @IsEnum(GateStatus)
-  status?: GateStatus;
 
   @ApiPropertyOptional({ description: 'Review notes from approver' })
   @IsOptional()

@@ -196,9 +196,11 @@ export class GatesService {
    * Validate coverage threshold for G6 (Testing gate).
    * Returns validation result with actual coverage if found.
    */
-  validateCoverageThreshold(
-    proofArtifacts: ProofArtifact[],
-  ): { valid: boolean; coverage: number | null; threshold: number } {
+  validateCoverageThreshold(proofArtifacts: ProofArtifact[]): {
+    valid: boolean;
+    coverage: number | null;
+    threshold: number;
+  } {
     const coverageArtifact = proofArtifacts.find(
       (a) => a.proofType === 'coverage_report' && a.passFail === 'pass',
     );
@@ -253,10 +255,7 @@ export class GatesService {
 
     // Check if proof artifacts are required and validate completeness
     if (gate.requiresProof) {
-      const { valid, missing } = this.validateProofArtifacts(
-        gate.gateType,
-        gate.proofArtifacts,
-      );
+      const { valid, missing } = this.validateProofArtifacts(gate.gateType, gate.proofArtifacts);
 
       if (!valid) {
         if (missing.length > 0) {
@@ -279,9 +278,7 @@ export class GatesService {
             projectId: gate.projectId,
             userId,
           });
-          throw new BadRequestException(
-            'Cannot approve gate: No approved proof artifacts found',
-          );
+          throw new BadRequestException('Cannot approve gate: No approved proof artifacts found');
         }
       }
 

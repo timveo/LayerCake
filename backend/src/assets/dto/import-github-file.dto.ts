@@ -1,4 +1,12 @@
-import { IsString, IsEnum, IsOptional, IsArray, ArrayMinSize, ArrayMaxSize, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsArray,
+  ArrayMinSize,
+  ArrayMaxSize,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AssetType } from '@prisma/client';
 

@@ -140,6 +140,8 @@ export class UniversalInputService {
       return null;
     }
 
+    this.logger.log(`User ${userId} confirming gate plan for session ${sessionId}`);
+
     // Convert array to record
     const decisionRecord: Record<string, { action: GateAction; reason?: string }> = {};
     for (const d of decisions) {
@@ -149,11 +151,7 @@ export class UniversalInputService {
     // Get asset IDs from session (would need to store these)
     const assetIds: string[] = []; // TODO: Store asset IDs in session
 
-    return this.gateRecommender.buildGateContext(
-      session.result,
-      decisionRecord,
-      assetIds,
-    );
+    return this.gateRecommender.buildGateContext(session.result, decisionRecord, assetIds);
   }
 
   /**
@@ -171,6 +169,10 @@ export class UniversalInputService {
     if (!session) return;
 
     const startTime = Date.now();
+    const { includeSecurityScan = true, includeQualityMetrics = true } = options;
+    this.logger.log(
+      `Running analysis with options: securityScan=${includeSecurityScan}, qualityMetrics=${includeQualityMetrics}`,
+    );
 
     try {
       // Phase 0: Load files and classify
@@ -186,7 +188,10 @@ export class UniversalInputService {
 
       // Phase 2A: UI Analysis (if UI files present)
       let uiAnalysis: InputAnalysisResult['uiAnalysis'] | undefined;
-      if (classification.completeness === 'ui-only' || classification.completeness === 'full-stack') {
+      if (
+        classification.completeness === 'ui-only' ||
+        classification.completeness === 'full-stack'
+      ) {
         this.updateSession(sessionId, 'analyzing-ui', 35, 'Analyzing UI code');
 
         const uiResult = await this.uiAnalyzer.analyzeUI(files);
@@ -271,9 +276,7 @@ export class UniversalInputService {
       session.result = result;
       this.updateSession(sessionId, 'complete', 100, 'Analysis complete');
 
-      this.logger.log(
-        `Analysis complete for session ${sessionId} in ${result.durationMs}ms`,
-      );
+      this.logger.log(`Analysis complete for session ${sessionId} in ${result.durationMs}ms`);
     } catch (error) {
       this.logger.error(`Analysis failed for session ${sessionId}`, error);
       session.status = 'failed';
@@ -417,7 +420,8 @@ export class UniversalInputService {
     ];
 
     return (
-      (lowerPath.endsWith('.ts') && !lowerPath.endsWith('.tsx')) &&
+      lowerPath.endsWith('.ts') &&
+      !lowerPath.endsWith('.tsx') &&
       backendIndicators.some((i) => lowerPath.includes(i))
     );
   }

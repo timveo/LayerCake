@@ -26,13 +26,7 @@ import { PrismaModule } from '../common/prisma/prisma.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [
-    AuthService,
-    TokenStorageService,
-    JwtStrategy,
-    JwtRefreshStrategy,
-    GitHubStrategy,
-  ],
+  providers: [AuthService, TokenStorageService, JwtStrategy, JwtRefreshStrategy, GitHubStrategy],
   exports: [AuthService],
 })
 export class AuthModule {}

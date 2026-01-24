@@ -47,7 +47,18 @@ export class AssetsController {
       properties: {
         file: { type: 'string', format: 'binary' },
         sessionId: { type: 'string' },
-        assetType: { type: 'string', enum: ['DESIGN_MOCKUP', 'SCREENSHOT', 'REFERENCE', 'LOGO', 'CODE_FILE', 'CONFIG_FILE', 'OTHER'] },
+        assetType: {
+          type: 'string',
+          enum: [
+            'DESIGN_MOCKUP',
+            'SCREENSHOT',
+            'REFERENCE',
+            'LOGO',
+            'CODE_FILE',
+            'CONFIG_FILE',
+            'OTHER',
+          ],
+        },
         description: { type: 'string' },
       },
       required: ['file', 'sessionId'],
@@ -84,7 +95,18 @@ export class AssetsController {
       type: 'object',
       properties: {
         file: { type: 'string', format: 'binary' },
-        assetType: { type: 'string', enum: ['DESIGN_MOCKUP', 'SCREENSHOT', 'REFERENCE', 'LOGO', 'CODE_FILE', 'CONFIG_FILE', 'OTHER'] },
+        assetType: {
+          type: 'string',
+          enum: [
+            'DESIGN_MOCKUP',
+            'SCREENSHOT',
+            'REFERENCE',
+            'LOGO',
+            'CODE_FILE',
+            'CONFIG_FILE',
+            'OTHER',
+          ],
+        },
         description: { type: 'string' },
       },
       required: ['file', 'assetType'],
@@ -122,10 +144,7 @@ export class AssetsController {
   @ApiResponse({ status: 400, description: 'Invalid parameters' })
   @ApiResponse({ status: 403, description: 'Not authorized to access this project' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async associateWithProject(
-    @Body() dto: AssociateAssetsDto,
-    @CurrentUser() user: RequestUser,
-  ) {
+  async associateWithProject(@Body() dto: AssociateAssetsDto, @CurrentUser() user: RequestUser) {
     return this.assetsService.associateTempUploads(
       dto.tempKeys,
       dto.projectId,
@@ -139,10 +158,7 @@ export class AssetsController {
   @ApiResponse({ status: 200, description: 'List of project assets with signed URLs' })
   @ApiResponse({ status: 403, description: 'Not authorized to access this project' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async getProjectAssets(
-    @Param('projectId') projectId: string,
-    @CurrentUser() user: RequestUser,
-  ) {
+  async getProjectAssets(@Param('projectId') projectId: string, @CurrentUser() user: RequestUser) {
     return this.assetsService.getProjectAssets(projectId, user.id);
   }
 
@@ -151,10 +167,7 @@ export class AssetsController {
   @ApiResponse({ status: 200, description: 'Asset details with signed URL' })
   @ApiResponse({ status: 403, description: 'Not authorized to access this asset' })
   @ApiResponse({ status: 404, description: 'Asset not found' })
-  async getAsset(
-    @Param('id') id: string,
-    @CurrentUser() user: RequestUser,
-  ) {
+  async getAsset(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.assetsService.getAsset(id, user.id);
   }
 
@@ -164,10 +177,7 @@ export class AssetsController {
   @ApiResponse({ status: 204, description: 'Asset deleted successfully' })
   @ApiResponse({ status: 403, description: 'Not authorized to delete this asset' })
   @ApiResponse({ status: 404, description: 'Asset not found' })
-  async deleteAsset(
-    @Param('id') id: string,
-    @CurrentUser() user: RequestUser,
-  ) {
+  async deleteAsset(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     await this.assetsService.deleteAsset(id, user.id);
   }
 
@@ -177,10 +187,7 @@ export class AssetsController {
   @ApiResponse({ status: 204, description: 'Temporary upload deleted successfully' })
   @ApiResponse({ status: 403, description: 'Not authorized to delete this upload' })
   @ApiResponse({ status: 404, description: 'Temporary upload not found' })
-  async deleteTempUpload(
-    @Param('tempKey') tempKey: string,
-    @CurrentUser() user: RequestUser,
-  ) {
+  async deleteTempUpload(@Param('tempKey') tempKey: string, @CurrentUser() user: RequestUser) {
     // Decode the temp key (it's URL encoded due to slashes)
     const decodedKey = decodeURIComponent(tempKey);
     await this.assetsService.deleteTempUpload(decodedKey, user.id);

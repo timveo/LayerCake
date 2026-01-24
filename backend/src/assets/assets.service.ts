@@ -310,10 +310,7 @@ export class AssetsService {
   /**
    * Get a single asset with signed URL
    */
-  async getAsset(
-    assetId: string,
-    userId: string,
-  ): Promise<ProjectAsset & { signedUrl: string }> {
+  async getAsset(assetId: string, userId: string): Promise<ProjectAsset & { signedUrl: string }> {
     const asset = await this.prisma.projectAsset.findUnique({
       where: { id: assetId },
     });

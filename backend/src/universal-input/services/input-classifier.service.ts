@@ -90,9 +90,9 @@ export class InputClassifierService {
 
     this.logger.log(
       `AI Classification complete: ${classification.completeness}, ` +
-      `UI: ${classification.uiFramework || 'none'}, ` +
-      `Backend: ${classification.backendFramework || 'none'}, ` +
-      `Confidence: ${(classification.confidence * 100).toFixed(0)}%`,
+        `UI: ${classification.uiFramework || 'none'}, ` +
+        `Backend: ${classification.backendFramework || 'none'}, ` +
+        `Confidence: ${(classification.confidence * 100).toFixed(0)}%`,
     );
 
     return classification;
@@ -159,9 +159,10 @@ export class InputClassifierService {
       if (keyFiles.some((k) => fileName === k.toLowerCase()) && file.content) {
         // Truncate large files
         const maxLength = 3000;
-        const content = file.content.length > maxLength
-          ? file.content.substring(0, maxLength) + '\n... (truncated)'
-          : file.content;
+        const content =
+          file.content.length > maxLength
+            ? file.content.substring(0, maxLength) + '\n... (truncated)'
+            : file.content;
 
         contents += `=== ${file.path} ===\n${content}\n\n`;
       }
@@ -329,6 +330,17 @@ Return a JSON object with this structure:
       result.artifacts = this.createEmptyArtifacts();
     }
 
+    // Validate that referenced artifact paths actually exist in uploaded files
+    const filePaths = new Set(files.map((f) => f.path));
+    if (result.artifacts.prdFiles) {
+      result.artifacts.prdFiles = result.artifacts.prdFiles.filter((p) => filePaths.has(p));
+    }
+    if (result.artifacts.architectureFiles) {
+      result.artifacts.architectureFiles = result.artifacts.architectureFiles.filter((p) =>
+        filePaths.has(p),
+      );
+    }
+
     return result;
   }
 
@@ -346,7 +358,8 @@ Return a JSON object with this structure:
       (p) => p.endsWith('.tsx') || p.endsWith('.jsx') || p.endsWith('.vue'),
     );
     const hasBackendCode = filePaths.some(
-      (p) => p.includes('/controllers/') || p.includes('/services/') || p.endsWith('.controller.ts'),
+      (p) =>
+        p.includes('/controllers/') || p.includes('/services/') || p.endsWith('.controller.ts'),
     );
     const hasPrisma = filePaths.some((p) => p.endsWith('schema.prisma'));
     const hasOpenAPI = fileNames.some((n) => n.includes('openapi') || n.includes('swagger'));
@@ -408,7 +421,9 @@ Return a JSON object with this structure:
 
   private isCodeFile(path: string): boolean {
     const ext = path.split('.').pop()?.toLowerCase();
-    return ['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'java', 'vue', 'svelte'].includes(ext || '');
+    return ['ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'java', 'vue', 'svelte'].includes(
+      ext || '',
+    );
   }
 
   private isConfigFile(path: string): boolean {

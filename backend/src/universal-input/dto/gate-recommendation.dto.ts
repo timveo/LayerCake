@@ -2,7 +2,7 @@
  * DTOs for Gate Recommendations and User Confirmation
  */
 
-import { InputAnalysisResult, SecurityIssue, QualityMetrics } from './input-analysis.dto';
+import { SecurityIssue, QualityMetrics } from './input-analysis.dto';
 
 // Gate action types
 export type GateAction = 'skip' | 'validate' | 'delta' | 'full';

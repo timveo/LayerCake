@@ -10,10 +10,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UniversalInputService } from './universal-input.service';
-import {
-  StartAnalysisDto,
-  AnalysisStatusDto,
-} from './dto/input-analysis.dto';
+import { StartAnalysisDto, AnalysisStatusDto } from './dto/input-analysis.dto';
 import {
   ConfirmGatePlanDto,
   GatePlanResponseDto,
@@ -34,30 +31,22 @@ export class UniversalInputController {
    * Phase 0 (Classification) + Phase 2 (Deep Analysis)
    */
   @Post('analyze')
-  async startAnalysis(
-    @Body() dto: StartAnalysisDto,
-  ): Promise<AnalysisStatusDto> {
+  async startAnalysis(@Body() dto: StartAnalysisDto): Promise<AnalysisStatusDto> {
     if (!dto.sessionId) {
       throw new BadRequestException('sessionId is required');
     }
 
-    return this.universalInputService.startAnalysis(
-      dto.sessionId,
-      dto.assetIds || [],
-      {
-        includeSecurityScan: dto.includeSecurityScan ?? true,
-        includeQualityMetrics: dto.includeQualityMetrics ?? true,
-      },
-    );
+    return this.universalInputService.startAnalysis(dto.sessionId, dto.assetIds || [], {
+      includeSecurityScan: dto.includeSecurityScan ?? true,
+      includeQualityMetrics: dto.includeQualityMetrics ?? true,
+    });
   }
 
   /**
    * Get analysis status and results
    */
   @Get('status/:sessionId')
-  async getStatus(
-    @Param('sessionId') sessionId: string,
-  ): Promise<AnalysisStatusDto> {
+  async getStatus(@Param('sessionId') sessionId: string): Promise<AnalysisStatusDto> {
     return this.universalInputService.getStatus(sessionId);
   }
 
@@ -65,9 +54,7 @@ export class UniversalInputController {
    * Get gate plan (recommendations) after analysis is complete
    */
   @Get('gate-plan/:sessionId')
-  async getGatePlan(
-    @Param('sessionId') sessionId: string,
-  ): Promise<GatePlanResponseDto> {
+  async getGatePlan(@Param('sessionId') sessionId: string): Promise<GatePlanResponseDto> {
     const plan = await this.universalInputService.getGatePlan(sessionId);
 
     if (!plan) {

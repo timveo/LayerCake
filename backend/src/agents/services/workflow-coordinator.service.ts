@@ -2770,7 +2770,9 @@ This is an automatic checkpoint commit created after gate approval.`;
     currentGate: string;
     message: string;
   }> {
-    console.log(`[WorkflowCoordinator] Starting workflow with GateContext for project ${projectId}`);
+    console.log(
+      `[WorkflowCoordinator] Starting workflow with GateContext for project ${projectId}`,
+    );
     console.log(`[WorkflowCoordinator] Gate routing:`, gateContext.routing);
 
     // Store gate context in session for later reference
@@ -2815,7 +2817,12 @@ This is an automatic checkpoint commit created after gate approval.`;
     await this.emitAssumptionsFromContext(projectId, gateContext);
 
     // Determine first gate to execute (skip G1, check G2 action)
-    const firstGate = await this.getNextGateWithContext(projectId, 'G1_PENDING', gateContext, userId);
+    const firstGate = await this.getNextGateWithContext(
+      projectId,
+      'G1_PENDING',
+      gateContext,
+      userId,
+    );
 
     if (firstGate) {
       // Start executing the first gate
@@ -2869,7 +2876,7 @@ This is an automatic checkpoint commit created after gate approval.`;
     // Gate routing assumptions
     const { routing } = gateContext;
     if (routing.skipGates.length > 0) {
-      const skippedGateNames = routing.skipGates.map(g => {
+      const skippedGateNames = routing.skipGates.map((g) => {
         const names: Record<string, string> = {
           G1: 'Scope Definition',
           G2: 'Product Requirements',
@@ -2883,7 +2890,9 @@ This is an automatic checkpoint commit created after gate approval.`;
         };
         return names[g] || g;
       });
-      assumptions.push(`I'll skip these phases since they're already covered: ${skippedGateNames.join(', ')}`);
+      assumptions.push(
+        `I'll skip these phases since they're already covered: ${skippedGateNames.join(', ')}`,
+      );
     }
 
     if (routing.deltaGates.length > 0) {
@@ -2898,10 +2907,12 @@ This is an automatic checkpoint commit created after gate approval.`;
     if (gateContext.extractedArtifacts?.securityIssues?.length) {
       const count = gateContext.extractedArtifacts.securityIssues.length;
       const critical = gateContext.extractedArtifacts.securityIssues.filter(
-        i => i.severity === 'critical' || i.severity === 'high'
+        (i) => i.severity === 'critical' || i.severity === 'high',
       ).length;
       if (critical > 0) {
-        assumptions.push(`I found ${count} security issues (${critical} critical/high priority) that I'll address`);
+        assumptions.push(
+          `I found ${count} security issues (${critical} critical/high priority) that I'll address`,
+        );
       } else {
         assumptions.push(`I found ${count} security issues to address`);
       }
@@ -2909,7 +2920,7 @@ This is an automatic checkpoint commit created after gate approval.`;
 
     // Format as a chat message from the Orchestrator
     if (assumptions.length > 0) {
-      const assumptionsMessage = `Based on my analysis of your uploaded files, here's what I understand:\n\n${assumptions.map(a => `• ${a}`).join('\n')}\n\nI'll proceed with these assumptions. Let me know if any of these are incorrect and I'll adjust my approach.`;
+      const assumptionsMessage = `Based on my analysis of your uploaded files, here's what I understand:\n\n${assumptions.map((a) => `• ${a}`).join('\n')}\n\nI'll proceed with these assumptions. Let me know if any of these are incorrect and I'll adjust my approach.`;
 
       // Emit as an orchestrator message via WebSocket
       this.wsGateway.emitOrchestratorMessage(projectId, assumptionsMessage, 'assumptions');
@@ -3062,12 +3073,20 @@ This is an automatic checkpoint commit created after gate approval.`;
     console.log(`[WorkflowCoordinator] Running ${agents.length} agent(s) in VALIDATION mode`);
 
     // Get handoff context with extracted artifacts
-    const handoffContext = await this.getHandoffContextWithExtracted(projectId, gateType, gateContext);
+    const handoffContext = await this.getHandoffContextWithExtracted(
+      projectId,
+      gateType,
+      gateContext,
+    );
 
     // Execute agents with validation instructions
     for (const agentType of agents) {
       const taskDescription = getAgentTaskDescription(agentType, gateType);
-      const validationPrompt = this.buildValidationPrompt(taskDescription, handoffContext, gateContext);
+      const validationPrompt = this.buildValidationPrompt(
+        taskDescription,
+        handoffContext,
+        gateContext,
+      );
 
       await this.executeSingleAgent(projectId, agentType, gateType, userId, validationPrompt);
     }
@@ -3098,7 +3117,11 @@ This is an automatic checkpoint commit created after gate approval.`;
     console.log(`[WorkflowCoordinator] Running ${agents.length} agent(s) in DELTA mode`);
 
     // Get handoff context with extracted artifacts
-    const handoffContext = await this.getHandoffContextWithExtracted(projectId, gateType, gateContext);
+    const handoffContext = await this.getHandoffContextWithExtracted(
+      projectId,
+      gateType,
+      gateContext,
+    );
 
     // Execute agents with delta instructions
     for (const agentType of agents) {

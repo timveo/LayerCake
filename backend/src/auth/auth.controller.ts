@@ -27,10 +27,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequestUser, UserProfile } from '../common/types/user.types';
-import {
-  type GitHubOAuthResult,
-  isGitHubOAuthConfigured,
-} from './strategies/github.strategy';
+import { type GitHubOAuthResult, isGitHubOAuthConfigured } from './strategies/github.strategy';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -158,7 +155,11 @@ export class AuthController {
   @Public()
   @Get('github')
   @ApiOperation({ summary: 'Initiate GitHub OAuth flow' })
-  @ApiQuery({ name: 'returnUrl', required: false, description: 'URL to return to after authentication' })
+  @ApiQuery({
+    name: 'returnUrl',
+    required: false,
+    description: 'URL to return to after authentication',
+  })
   @ApiResponse({ status: 302, description: 'Redirects to GitHub for authentication' })
   @ApiResponse({ status: 400, description: 'GitHub OAuth not configured' })
   githubAuth(@Query('returnUrl') returnUrl?: string, @Req() req?: Request, @Res() res?: Response) {
@@ -185,10 +186,7 @@ export class AuthController {
   @ApiOperation({ summary: 'GitHub OAuth callback' })
   @ApiResponse({ status: 302, description: 'Redirects to frontend with tokens' })
   @ApiResponse({ status: 400, description: 'GitHub OAuth not configured' })
-  async githubCallback(
-    @Req() req: Request & { user: GitHubOAuthResult },
-    @Res() res: Response,
-  ) {
+  async githubCallback(@Req() req: Request & { user: GitHubOAuthResult }, @Res() res: Response) {
     // Check if GitHub OAuth is configured
     this.ensureGitHubConfigured();
 
@@ -198,7 +196,9 @@ export class AuthController {
     const result = await this.authService.handleGitHubOAuth(profile, accessToken);
 
     // Get return URL from session or use default
-    const returnUrl = ('session' in req ? ((req as any).session as Record<string, string>)?.returnUrl : null) || '/';
+    const returnUrl =
+      ('session' in req ? ((req as any).session as Record<string, string>)?.returnUrl : null) ||
+      '/';
 
     // Redirect to frontend with tokens as query params
     // In production, you'd want to use a more secure method

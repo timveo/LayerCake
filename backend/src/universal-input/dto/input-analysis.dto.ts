@@ -4,19 +4,35 @@
 
 // Framework detection results
 export type UIFramework = 'react' | 'vue' | 'angular' | 'svelte' | 'html' | 'nextjs' | 'unknown';
-export type BackendFramework = 'nestjs' | 'express' | 'fastapi' | 'django' | 'flask' | 'hono' | 'elysia' | 'unknown';
-export type ORMType = 'prisma' | 'typeorm' | 'sequelize' | 'drizzle' | 'sqlalchemy' | 'mongoose' | 'none' | 'unknown';
+export type BackendFramework =
+  | 'nestjs'
+  | 'express'
+  | 'fastapi'
+  | 'django'
+  | 'flask'
+  | 'hono'
+  | 'elysia'
+  | 'unknown';
+export type ORMType =
+  | 'prisma'
+  | 'typeorm'
+  | 'sequelize'
+  | 'drizzle'
+  | 'sqlalchemy'
+  | 'mongoose'
+  | 'none'
+  | 'unknown';
 export type AuthType = 'jwt' | 'session' | 'oauth' | 'api-key' | 'basic' | 'none' | 'unknown';
 export type ValidationLibrary = 'zod' | 'class-validator' | 'joi' | 'yup' | 'none' | 'unknown';
 
 // Completeness classification
 export type CompletenessLevel =
-  | 'prompt-only'      // No files, just text description
-  | 'ui-only'          // Frontend code/mockups only
-  | 'backend-only'     // Backend code only
-  | 'full-stack'       // Both frontend and backend
-  | 'contracts-only'   // OpenAPI/Prisma specs without implementation
-  | 'docs-only';       // PRD/Architecture docs without code
+  | 'prompt-only' // No files, just text description
+  | 'ui-only' // Frontend code/mockups only
+  | 'backend-only' // Backend code only
+  | 'full-stack' // Both frontend and backend
+  | 'contracts-only' // OpenAPI/Prisma specs without implementation
+  | 'docs-only'; // PRD/Architecture docs without code
 
 // Detected artifact types
 export interface DetectedArtifacts {
@@ -118,7 +134,14 @@ export interface ExtractedBackendRoute {
 // Security issue found during analysis
 export interface SecurityIssue {
   severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  category: 'sql-injection' | 'auth-bypass' | 'secrets-exposure' | 'dependency' | 'cors' | 'xss' | 'other';
+  category:
+    | 'sql-injection'
+    | 'auth-bypass'
+    | 'secrets-exposure'
+    | 'dependency'
+    | 'cors'
+    | 'xss'
+    | 'other';
   title: string;
   description: string;
   file?: string;
@@ -128,9 +151,9 @@ export interface SecurityIssue {
 
 // Quality metrics from analysis
 export interface QualityMetrics {
-  testCoverage?: number;       // 0-100%
-  typeCoverage?: number;       // 0-100% (for TypeScript)
-  codeComplexity?: number;     // Average cyclomatic complexity
+  testCoverage?: number; // 0-100%
+  typeCoverage?: number; // 0-100% (for TypeScript)
+  codeComplexity?: number; // Average cyclomatic complexity
   duplicateCodePercent?: number;
   lintErrors: number;
   lintWarnings: number;
@@ -156,7 +179,13 @@ export interface InputAnalysisResult {
     extractedEndpoints: ExtractedAPIEndpoint[];
     stateManagement?: 'redux' | 'zustand' | 'context' | 'mobx' | 'recoil' | 'jotai' | 'none';
     routingLibrary?: 'react-router' | 'next-router' | 'vue-router' | 'tanstack-router' | 'none';
-    stylingApproach?: 'tailwind' | 'css-modules' | 'styled-components' | 'emotion' | 'sass' | 'plain-css';
+    stylingApproach?:
+      | 'tailwind'
+      | 'css-modules'
+      | 'styled-components'
+      | 'emotion'
+      | 'sass'
+      | 'plain-css';
     componentCount: number;
     pageCount: number;
   };
@@ -164,7 +193,7 @@ export interface InputAnalysisResult {
   // Backend Analysis (Phase 2B)
   backendAnalysis?: {
     extractedRoutes: ExtractedBackendRoute[];
-    extractedSchema?: string;  // Prisma schema content
+    extractedSchema?: string; // Prisma schema content
     generatedOpenAPI?: object; // Generated OpenAPI spec
     authPatterns: {
       type: AuthType;
@@ -206,7 +235,7 @@ export interface InputAnalysisResult {
 // Request DTO for starting analysis
 export class StartAnalysisDto {
   sessionId: string;
-  assetIds?: string[];  // Optional - analyze specific assets
+  assetIds?: string[]; // Optional - analyze specific assets
   includeSecurityScan?: boolean;
   includeQualityMetrics?: boolean;
 }
@@ -214,7 +243,14 @@ export class StartAnalysisDto {
 // Response DTO for analysis status
 export class AnalysisStatusDto {
   sessionId: string;
-  status: 'pending' | 'classifying' | 'analyzing-ui' | 'analyzing-backend' | 'cross-analyzing' | 'complete' | 'failed';
+  status:
+    | 'pending'
+    | 'classifying'
+    | 'analyzing-ui'
+    | 'analyzing-backend'
+    | 'cross-analyzing'
+    | 'complete'
+    | 'failed';
   progress: number; // 0-100
   currentPhase: string;
   classification?: InputClassification;

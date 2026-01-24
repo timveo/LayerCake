@@ -14,10 +14,23 @@ interface UIAnalysisResult {
   extractedEndpoints: ExtractedAPIEndpoint[];
   stateManagement?: 'redux' | 'zustand' | 'context' | 'mobx' | 'recoil' | 'jotai' | 'none';
   routingLibrary?: 'react-router' | 'next-router' | 'vue-router' | 'tanstack-router' | 'none';
-  stylingApproach?: 'tailwind' | 'css-modules' | 'styled-components' | 'emotion' | 'sass' | 'plain-css';
+  stylingApproach?:
+    | 'tailwind'
+    | 'css-modules'
+    | 'styled-components'
+    | 'emotion'
+    | 'sass'
+    | 'plain-css';
   componentCount: number;
   pageCount: number;
-  dataFetchingPattern?: 'tanstack-query' | 'swr' | 'rtk-query' | 'apollo' | 'fetch' | 'axios' | 'none';
+  dataFetchingPattern?:
+    | 'tanstack-query'
+    | 'swr'
+    | 'rtk-query'
+    | 'apollo'
+    | 'fetch'
+    | 'axios'
+    | 'none';
   formLibrary?: 'react-hook-form' | 'formik' | 'none';
   inferredFeatures: string[];
   businessRules: string[];
@@ -65,10 +78,10 @@ export class UIAnalyzerService {
   /**
    * AI-Native comprehensive UI analysis
    */
-  private async runUIAnalysis(
-    fileContents: string,
-    files: FileInfo[],
-  ): Promise<UIAnalysisResult> {
+  private async runUIAnalysis(fileContents: string, files: FileInfo[]): Promise<UIAnalysisResult> {
+    const filePaths = files.map((f) => f.path).join(', ');
+    this.logger.debug(`Analyzing UI from files: ${filePaths}`);
+
     const systemPrompt = `You are an expert frontend code analyst. Your job is to analyze UI code and extract:
 
 1. ALL API ENDPOINTS - Find every fetch, axios, API call, query hook usage. Extract:

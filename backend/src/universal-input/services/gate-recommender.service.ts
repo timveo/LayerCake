@@ -1,11 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
-import {
-  InputAnalysisResult,
-  InputClassification,
-  CompletenessLevel,
-} from '../dto/input-analysis.dto';
+import { InputAnalysisResult, CompletenessLevel } from '../dto/input-analysis.dto';
 import {
   GatePlan,
   GateRecommendation,
@@ -263,7 +259,8 @@ CROSS-ANALYSIS:
           gate: gate as GateRecommendation['gate'],
           gateName: gateNames[gate],
           recommendedAction: gate === 'G1' ? 'skip' : 'full',
-          reason: gate === 'G1' ? 'Analysis replaces scope definition' : 'Full execution recommended',
+          reason:
+            gate === 'G1' ? 'Analysis replaces scope definition' : 'Full execution recommended',
           confidence: 0.5,
           existingArtifacts: [],
           userQuestion: `How should we handle ${gateNames[gate]}?`,
@@ -295,7 +292,7 @@ CROSS-ANALYSIS:
       {
         action: 'delta',
         label: 'Fill gaps only',
-        description: 'Only add what\'s missing',
+        description: "Only add what's missing",
         isRecommended: recommendedAction === 'delta',
       },
       {
@@ -312,9 +309,7 @@ CROSS-ANALYSIS:
   /**
    * Create fallback recommendations when AI fails
    */
-  private createFallbackRecommendations(
-    analysisResult: InputAnalysisResult,
-  ): GateRecommendation[] {
+  private createFallbackRecommendations(analysisResult: InputAnalysisResult): GateRecommendation[] {
     const { classification } = analysisResult;
     const recommendations: GateRecommendation[] = [];
 
@@ -359,7 +354,9 @@ CROSS-ANALYSIS:
       confidence: 0.7,
       existingArtifacts: [
         ...classification.artifacts.openAPIFiles,
-        ...(classification.artifacts.prismaSchemaPath ? [classification.artifacts.prismaSchemaPath] : []),
+        ...(classification.artifacts.prismaSchemaPath
+          ? [classification.artifacts.prismaSchemaPath]
+          : []),
       ],
       userQuestion: hasArchArtifacts
         ? 'I found API specs and/or database schema. Review and use them?'
@@ -443,9 +440,7 @@ CROSS-ANALYSIS:
   /**
    * Extract highlights from analysis
    */
-  private extractHighlights(
-    analysisResult: InputAnalysisResult,
-  ): GatePlan['highlights'] {
+  private extractHighlights(analysisResult: InputAnalysisResult): GatePlan['highlights'] {
     const highlights: GatePlan['highlights'] = [];
     const { classification, backendAnalysis, crossAnalysis } = analysisResult;
 
@@ -478,13 +473,16 @@ CROSS-ANALYSIS:
 
     // Warning highlights
     if (backendAnalysis && backendAnalysis.securityIssues.length > 0) {
-      const critical = backendAnalysis.securityIssues.filter((i) => i.severity === 'critical').length;
+      const critical = backendAnalysis.securityIssues.filter(
+        (i) => i.severity === 'critical',
+      ).length;
       highlights.push({
         type: critical > 0 ? 'error' : 'warning',
         title: `${backendAnalysis.securityIssues.length} Security Issue${backendAnalysis.securityIssues.length > 1 ? 's' : ''} Found`,
-        description: critical > 0
-          ? `${critical} critical issue(s) require immediate attention`
-          : 'Security issues detected that should be addressed',
+        description:
+          critical > 0
+            ? `${critical} critical issue(s) require immediate attention`
+            : 'Security issues detected that should be addressed',
         relatedGate: 'G7',
       });
     }
@@ -493,7 +491,7 @@ CROSS-ANALYSIS:
       highlights.push({
         type: 'warning',
         title: `${crossAnalysis.missingBackendEndpoints.length} Missing API Endpoint${crossAnalysis.missingBackendEndpoints.length > 1 ? 's' : ''}`,
-        description: 'UI calls endpoints that backend doesn\'t implement',
+        description: "UI calls endpoints that backend doesn't implement",
         relatedGate: 'G5',
       });
     }
@@ -535,7 +533,10 @@ CROSS-ANALYSIS:
   private buildSecuritySummary(
     analysisResult: InputAnalysisResult,
   ): GatePlan['securitySummary'] | undefined {
-    if (!analysisResult.backendAnalysis || analysisResult.backendAnalysis.securityIssues.length === 0) {
+    if (
+      !analysisResult.backendAnalysis ||
+      analysisResult.backendAnalysis.securityIssues.length === 0
+    ) {
       return undefined;
     }
 

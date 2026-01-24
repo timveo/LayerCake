@@ -64,13 +64,12 @@ export class BackendAnalyzerService {
     const fileContents = this.prepareFileContents(backendFiles);
 
     // Run parallel AI analyses
-    const [routeAnalysis, schemaAnalysis, securityAnalysis, qualityAnalysis] =
-      await Promise.all([
-        this.analyzeRoutesWithAI(fileContents, backendFiles),
-        this.analyzeSchemaWithAI(fileContents, backendFiles),
-        this.analyzeSecurityWithAI(fileContents, backendFiles),
-        this.analyzeQualityWithAI(fileContents, backendFiles),
-      ]);
+    const [routeAnalysis, schemaAnalysis, securityAnalysis, qualityAnalysis] = await Promise.all([
+      this.analyzeRoutesWithAI(fileContents, backendFiles),
+      this.analyzeSchemaWithAI(fileContents, backendFiles),
+      this.analyzeSecurityWithAI(fileContents, backendFiles),
+      this.analyzeQualityWithAI(fileContents, backendFiles),
+    ]);
 
     // Merge results
     const result: BackendAnalysisResult = {
@@ -104,6 +103,9 @@ export class BackendAnalyzerService {
     authPatterns: { type: AuthType; details: string; files: string[] }[];
     validationSchemas: { library: ValidationLibrary; schemas: { name: string; file: string }[] };
   }> {
+    const filePaths = files.map((f) => f.path).join(', ');
+    this.logger.debug(`Analyzing routes from files: ${filePaths}`);
+
     const systemPrompt = `You are an expert backend code analyst. Your job is to analyze backend code and extract:
 1. All API routes/endpoints with their HTTP methods, paths, controllers, and auth requirements
 2. Generate a valid OpenAPI 3.0 specification from the routes
@@ -255,6 +257,9 @@ Return a JSON object:
     fileContents: string,
     files: FileInfo[],
   ): Promise<{ issues: SecurityIssue[] }> {
+    const filePaths = files.map((f) => f.path).join(', ');
+    this.logger.debug(`Analyzing security for files: ${filePaths}`);
+
     const systemPrompt = `You are an expert application security analyst. Your job is to analyze backend code and identify security vulnerabilities:
 
 CATEGORIES TO CHECK:

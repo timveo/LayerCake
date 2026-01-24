@@ -337,10 +337,7 @@ export class AuthService {
   /**
    * Handle GitHub OAuth callback - create or link user account
    */
-  async handleGitHubOAuth(
-    profile: GitHubProfile,
-    accessToken: string,
-  ): Promise<AuthResponseDto> {
+  async handleGitHubOAuth(profile: GitHubProfile, accessToken: string): Promise<AuthResponseDto> {
     const email = profile.emails?.[0]?.value;
     const avatarUrl = profile.photos?.[0]?.value;
 
@@ -384,9 +381,7 @@ export class AuthService {
     if (!user) {
       // Create new user
       if (!email) {
-        throw new BadRequestException(
-          'GitHub account must have a public email address',
-        );
+        throw new BadRequestException('GitHub account must have a public email address');
       }
 
       user = await this.prisma.user.create({

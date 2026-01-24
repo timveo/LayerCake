@@ -11,11 +11,7 @@ import { StorageModule } from '../storage/storage.module';
 import { AssetsModule } from '../assets/assets.module';
 
 @Module({
-  imports: [
-    PrismaModule,
-    StorageModule,
-    forwardRef(() => AssetsModule),
-  ],
+  imports: [PrismaModule, StorageModule, forwardRef(() => AssetsModule)],
   controllers: [UniversalInputController],
   providers: [
     UniversalInputService,
@@ -25,10 +21,6 @@ import { AssetsModule } from '../assets/assets.module';
     CrossAnalyzerService,
     GateRecommenderService,
   ],
-  exports: [
-    UniversalInputService,
-    InputClassifierService,
-    GateRecommenderService,
-  ],
+  exports: [UniversalInputService, InputClassifierService, GateRecommenderService],
 })
 export class UniversalInputModule {}

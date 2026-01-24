@@ -33,10 +33,7 @@ export class GitHubController {
   /**
    * Helper to get GitHub token - either from header or stored OAuth token
    */
-  private async getGitHubToken(
-    headerToken: string | undefined,
-    userId: string,
-  ): Promise<string> {
+  private async getGitHubToken(headerToken: string | undefined, userId: string): Promise<string> {
     if (headerToken) {
       return headerToken;
     }

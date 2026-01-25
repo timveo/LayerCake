@@ -146,8 +146,10 @@ export class CodeParserService {
   validateFiles(files: FileToWrite[]): {
     valid: boolean;
     errors: string[];
+    warnings: string[];
   } {
     const errors: string[] = [];
+    const warnings: string[] = [];
 
     for (const file of files) {
       // Check for empty content
@@ -174,7 +176,128 @@ export class CodeParserService {
     return {
       valid: errors.length === 0,
       errors,
+      warnings,
     };
+  }
+
+  /**
+   * Validate files for fullstack project directory structure.
+   * Ensures frontend files go to frontend/ and backend files go to backend/.
+   */
+  validateFullstackStructure(
+    files: FileToWrite[],
+    agentType?: string,
+  ): {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+  } {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    for (const file of files) {
+      const path = file.path;
+
+      // Check if file is in root src/ (should be frontend/src/ or backend/src/)
+      if (
+        path.startsWith('src/') &&
+        !path.startsWith('frontend/') &&
+        !path.startsWith('backend/')
+      ) {
+        // Determine which folder it should be in based on agent type or file content
+        const suggestedPrefix = this.inferProjectFolder(file, agentType);
+        errors.push(
+          `File ${path} is in root src/ but should be in ${suggestedPrefix}src/. ` +
+            `Fullstack projects require separate frontend/ and backend/ directories.`,
+        );
+      }
+
+      // Check frontend developer files are in frontend/
+      if (agentType === 'FRONTEND_DEVELOPER') {
+        if (
+          !path.startsWith('frontend/') &&
+          !path.startsWith('docs/') &&
+          !path.startsWith('specs/')
+        ) {
+          warnings.push(
+            `Frontend Developer generated file ${path} outside frontend/ directory. ` +
+              `Expected path: frontend/${path}`,
+          );
+        }
+      }
+
+      // Check backend developer files are in backend/
+      if (agentType === 'BACKEND_DEVELOPER') {
+        if (
+          !path.startsWith('backend/') &&
+          !path.startsWith('docs/') &&
+          !path.startsWith('specs/')
+        ) {
+          warnings.push(
+            `Backend Developer generated file ${path} outside backend/ directory. ` +
+              `Expected path: backend/${path}`,
+          );
+        }
+      }
+
+      // Check for mixed dependencies in package.json
+      if (path === 'package.json') {
+        errors.push(
+          `Root package.json detected. Fullstack projects should have separate ` +
+            `frontend/package.json and backend/package.json files.`,
+        );
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings,
+    };
+  }
+
+  /**
+   * Infer which project folder (frontend/ or backend/) a file should be in
+   */
+  private inferProjectFolder(file: FileToWrite, agentType?: string): string {
+    if (agentType === 'FRONTEND_DEVELOPER') return 'frontend/';
+    if (agentType === 'BACKEND_DEVELOPER') return 'backend/';
+
+    // Infer from file content
+    const content = file.content.toLowerCase();
+    const path = file.path.toLowerCase();
+
+    // Frontend indicators
+    if (
+      content.includes('import react') ||
+      content.includes("from 'react'") ||
+      content.includes('usestate') ||
+      content.includes('useeffect') ||
+      path.includes('.tsx') ||
+      path.includes('.jsx') ||
+      path.includes('component') ||
+      content.includes('@tanstack/react-query') ||
+      content.includes('tailwind')
+    ) {
+      return 'frontend/';
+    }
+
+    // Backend indicators
+    if (
+      content.includes('@nestjs') ||
+      content.includes('@injectable') ||
+      content.includes('@controller') ||
+      content.includes('prismaservice') ||
+      content.includes('express') ||
+      path.includes('.controller.') ||
+      path.includes('.service.') ||
+      path.includes('.module.')
+    ) {
+      return 'backend/';
+    }
+
+    // Default to backend for ambiguous files
+    return 'backend/';
   }
 
   /**

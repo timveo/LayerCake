@@ -10,6 +10,7 @@ import { SessionContextService } from '../../session-context/session-context.ser
 import { GitIntegrationService } from '../../code-generation/git-integration.service';
 import { GateAgentExecutorService } from './gate-agent-executor.service';
 import { ChatMessageService } from './chat-message.service';
+import { FeedbackService } from './feedback.service';
 import { getAgentsForGate, getAgentTaskDescription, isParallelGate } from '../../gates/gate-config';
 import { GateContext, GateAction } from '../../universal-input/dto/gate-recommendation.dto';
 
@@ -38,6 +39,8 @@ export class GateOrchestrationService {
     private readonly gateAgentExecutor: GateAgentExecutorService,
     @Inject(forwardRef(() => ChatMessageService))
     private readonly chatMessageService: ChatMessageService,
+    @Inject(forwardRef(() => FeedbackService))
+    private readonly feedbackService: FeedbackService,
   ) {}
 
   // ============================================================
@@ -351,6 +354,27 @@ export class GateOrchestrationService {
         await this.executeGateAgents(projectId, 'G4_PENDING', userId);
       } else if (gateType === 'G4_PENDING') {
         console.log('G4 approved - starting G5 (Development) agents in PARALLEL');
+
+        // Create explicit handoff record from G4 (Design) to G5 (Development)
+        const designDocs = await this.prisma.document.findMany({
+          where: {
+            projectId,
+            documentType: { in: ['DESIGN', 'ARCHITECTURE'] },
+          },
+          select: { title: true },
+        });
+
+        await this.prisma.handoff.create({
+          data: {
+            projectId,
+            fromAgent: 'UX_UI_DESIGNER',
+            toAgent: 'FRONTEND_DEVELOPER,BACKEND_DEVELOPER',
+            phase: 'development',
+            status: 'complete',
+            notes: `G4→G5 Transition: Design phase complete. Handing off to parallel development.\n\nDesign documents provided:\n${designDocs.map((d) => `- ${d.title}`).join('\n')}`,
+          },
+        });
+
         await this.executeGateAgents(projectId, 'G5_PENDING', userId);
       } else if (gateType === 'G5_PENDING') {
         console.log('G5 approved - starting G6 (Testing) agents');
@@ -435,6 +459,45 @@ export class GateOrchestrationService {
     }
 
     const projectType = project.type || 'traditional';
+
+    // G5 Readiness Check: Verify G4 (Design) is properly completed before starting development
+    if (gateType === 'G5_PENDING') {
+      const g4Gate = await this.prisma.gate.findFirst({
+        where: { projectId, gateType: 'G4_PENDING' },
+        select: { status: true },
+      });
+
+      if (!g4Gate || g4Gate.status !== 'APPROVED') {
+        console.error(
+          `[GateOrchestration] Cannot start G5: G4 (Design) is not approved. Status: ${g4Gate?.status || 'NOT_FOUND'}`,
+        );
+        this.wsGateway.emitChatMessage(
+          projectId,
+          `g5-blocked-${Date.now()}`,
+          'Cannot start development: Design phase (G4) must be approved first.',
+        );
+        return;
+      }
+
+      // Verify design deliverables exist
+      const designDocs = await this.prisma.document.findMany({
+        where: {
+          projectId,
+          documentType: { in: ['DESIGN', 'ARCHITECTURE'] },
+        },
+        select: { id: true, title: true },
+      });
+
+      if (designDocs.length === 0) {
+        console.warn(
+          `[GateOrchestration] Starting G5 without design documents - agents may lack design context`,
+        );
+      } else {
+        console.log(
+          `[GateOrchestration] G5 readiness check passed. Design documents available: ${designDocs.map((d) => d.title).join(', ')}`,
+        );
+      }
+    }
 
     // Ensure gate exists before executing agents
     const existingGate = await this.prisma.gate.findFirst({
@@ -655,6 +718,127 @@ export class GateOrchestrationService {
     );
 
     if ((incompleteCount === 0 && totalCount > 0) || hasDocuments) {
+      // For G5 (Development), verify proof artifacts show PASSING builds for BOTH agents
+      // AND that the preview server successfully starts
+      if (gateType === 'G5_PENDING') {
+        const requiredProofs = ['build_output', 'lint_output'];
+        const requiredAgents = ['FRONTEND_DEVELOPER', 'BACKEND_DEVELOPER'];
+
+        const proofs = await this.prisma.proofArtifact.findMany({
+          where: {
+            projectId,
+            gate: 'G5_PENDING',
+            proofType: { in: [...requiredProofs, 'preview_startup'] as any },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        // Validate that BOTH agents (frontend AND backend) have passing proofs
+        // Just counting total proofs isn't enough - need to verify by agent type
+        const agentProofStatus: Record<string, { build: boolean; lint: boolean }> = {};
+
+        for (const agent of requiredAgents) {
+          const agentBuildProof = proofs.find(
+            (p) => p.proofType === 'build_output' && p.createdBy === agent && p.passFail === 'pass',
+          );
+          const agentLintProof = proofs.find(
+            (p) => p.proofType === 'lint_output' && p.createdBy === agent && p.passFail === 'pass',
+          );
+
+          agentProofStatus[agent] = {
+            build: !!agentBuildProof,
+            lint: !!agentLintProof,
+          };
+        }
+
+        const frontendPassed =
+          agentProofStatus['FRONTEND_DEVELOPER']?.build &&
+          agentProofStatus['FRONTEND_DEVELOPER']?.lint;
+        const backendPassed =
+          agentProofStatus['BACKEND_DEVELOPER']?.build &&
+          agentProofStatus['BACKEND_DEVELOPER']?.lint;
+
+        // Check for preview_startup proof - this validates the app actually runs in the browser
+        const previewProof = proofs.find(
+          (p) => p.proofType === 'preview_startup' && p.passFail === 'pass',
+        );
+
+        if (!frontendPassed || !backendPassed || !previewProof) {
+          const missingParts: string[] = [];
+          if (!agentProofStatus['FRONTEND_DEVELOPER']?.build) missingParts.push('Frontend build');
+          if (!agentProofStatus['FRONTEND_DEVELOPER']?.lint) missingParts.push('Frontend lint');
+          if (!agentProofStatus['BACKEND_DEVELOPER']?.build) missingParts.push('Backend build');
+          if (!agentProofStatus['BACKEND_DEVELOPER']?.lint) missingParts.push('Backend lint');
+          if (!previewProof)
+            missingParts.push('Preview server startup (app must be viewable in browser)');
+
+          console.log(
+            `[GateOrchestration] G5 not ready: missing passing proofs for: ${missingParts.join(', ')}`,
+          );
+
+          // Check for failing proofs to provide feedback
+          const failingProofs = proofs.filter((p) => p.passFail === 'fail');
+          if (failingProofs.length > 0) {
+            const failureMessage =
+              `Build validation failed. Issues found:\n` +
+              failingProofs
+                .map((p) => `- ${p.createdBy} ${p.proofType}: ${p.contentSummary}`)
+                .join('\n');
+            this.wsGateway.emitChatMessage(
+              projectId,
+              `g5-validation-${Date.now()}`,
+              failureMessage,
+            );
+          }
+
+          // AUTO-FIX: Trigger automatic error fixing if preview or build failed
+          // This is the key integration point for the self-healing feedback loop
+          if (!previewProof || failingProofs.length > 0) {
+            console.log(
+              `[GateOrchestration] G5 validation failed - triggering auto-fix for project ${projectId}`,
+            );
+
+            // Use feedbackService to check for errors and auto-fix them
+            try {
+              const autoFixResult = await this.feedbackService.checkAndFixPreviewErrors(
+                projectId,
+                userId,
+                (pId, gType) => this.gateAgentExecutor.getHandoffContext(pId, gType),
+              );
+
+              if (autoFixResult.triggered) {
+                console.log(
+                  `[GateOrchestration] Auto-fix triggered for ${autoFixResult.errors?.length || 0} errors`,
+                );
+                // Don't return here - let the gate check run again after fix completes
+                // The agent's onComplete callback will re-trigger checkAndTransitionGate
+              } else {
+                // No errors detected by feedbackService, show the manual message
+                this.wsGateway.emitChatMessage(
+                  projectId,
+                  `g5-preview-${Date.now()}`,
+                  'The application must be viewable in the preview window before G5 can be marked ready. Please ensure the frontend code is generated and the preview server starts successfully.',
+                );
+              }
+            } catch (autoFixError) {
+              console.error(`[GateOrchestration] Auto-fix failed:`, autoFixError);
+              // Fall back to showing manual message
+              this.wsGateway.emitChatMessage(
+                projectId,
+                `g5-preview-${Date.now()}`,
+                'The application must be viewable in the preview window before G5 can be marked ready. Please ensure the frontend code is generated and the preview server starts successfully.',
+              );
+            }
+          }
+
+          return; // Don't transition - all proofs must pass including preview
+        }
+
+        console.log(
+          `[GateOrchestration] G5 validation passed: both FRONTEND_DEVELOPER and BACKEND_DEVELOPER have passing builds, and preview is working`,
+        );
+      }
+
       console.log(
         `[GateOrchestration] All deliverables complete, transitioning ${gateType} to review`,
       );

@@ -32,7 +32,7 @@ async function bootstrap() {
           fontSrc: ["'self'", 'data:'],
           objectSrc: ["'none'"],
           mediaSrc: ["'self'"],
-          frameSrc: ["'none'"],
+          frameSrc: ["'self'", 'http://localhost:*', 'https://localhost:*'], // Allow localhost for preview iframe
         },
       },
       crossOriginEmbedderPolicy: false, // Disable for API server

@@ -8,8 +8,8 @@ import {
   DocumentTextIcon,
   CheckIcon,
   XMarkIcon,
-  ChevronRightIcon,
   FolderIcon,
+  ChevronRightIcon,
 } from '@heroicons/react/24/outline';
 import { projectsApi } from '../api/projects';
 import { metricsApi, type ProjectProgress, type WorkflowStatus, type ProjectCosts, type ProjectMetrics } from '../api/metrics';
@@ -18,6 +18,7 @@ import { journeyApi } from '../api/journey';
 import { workflowApi } from '../api/workflow';
 import { documentsApi } from '../api/documents';
 import { agentsApi } from '../api/agents';
+import { workspaceApi, type DirectoryNode } from '../api/workspace';
 // import { assetsApi, type ProjectAsset } from '../api/assets';
 import type { Document } from '../types';
 import { useThemeStore } from '../stores/theme';
@@ -569,12 +570,13 @@ const GitHubPopup = ({ isOpen, onClose, theme, projectId }: { isOpen: boolean; o
 
 // ============ CENTER PANEL COMPONENTS ============
 
-const WorkspacePanel = ({ activeTab, onTabChange, theme, projectId, autoSelectDocumentKey }: {
+const WorkspacePanel = ({ activeTab, onTabChange, theme, projectId, autoSelectDocumentKey, renderChat }: {
   activeTab: WorkspaceTab;
   onTabChange: (tab: WorkspaceTab, documentId?: string) => void;
   theme: ThemeMode;
   projectId: string | null;
   autoSelectDocumentKey?: string | null;
+  renderChat?: () => React.ReactNode;
 }) => {
   const isDark = theme === 'dark';
   const tabs: { id: WorkspaceTab; label: string }[] = [
@@ -619,7 +621,7 @@ const WorkspacePanel = ({ activeTab, onTabChange, theme, projectId, autoSelectDo
             >
               {activeTab === 'ui' && <UIPreviewContent theme={theme} projectId={projectId} />}
               {activeTab === 'docs' && <DocsContent theme={theme} projectId={projectId} autoSelectDocumentKey={autoSelectDocumentKey} />}
-              {activeTab === 'code' && <CodeContent theme={theme} projectId={projectId} />}
+              {activeTab === 'code' && <CodeContent theme={theme} projectId={projectId} renderChat={renderChat} />}
               {activeTab === 'map' && <JourneyContent theme={theme} projectId={projectId} onViewDocument={(docId) => {
                 onTabChange('docs', docId);
               }} />}
@@ -636,27 +638,49 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
   const isDark = theme === 'dark';
   const queryClient = useQueryClient();
 
-  // Fetch design concepts directly from the DesignConcept table
+  // Fetch design concepts (for G4 - before code exists)
   const { data: designConcepts, isLoading, error } = useQuery({
     queryKey: ['design-concepts', projectId],
     queryFn: async () => {
       if (!projectId) return [];
-      console.log('[UIPreview] Fetching design concepts for project:', projectId);
       const result = await documentsApi.getDesignConcepts(projectId);
-      console.log('[UIPreview] Received design concepts:', result?.length, result);
       return result;
     },
     enabled: !!projectId,
-    staleTime: 10000, // Cache for 10 seconds
-    refetchInterval: 15000, // Auto-refresh every 15 seconds while on this tab
+    staleTime: 10000,
+    refetchInterval: 15000,
   });
 
-  // Log any query errors
+  // Check if workspace has code (G5+)
+  const { data: workspaceTree } = useQuery({
+    queryKey: ['workspace-tree', projectId],
+    queryFn: () => projectId ? workspaceApi.getTree(projectId) : null,
+    enabled: !!projectId,
+    staleTime: 30000,
+    refetchInterval: 10000, // Check periodically for code generation
+  });
+
+  // Check preview server status
+  const { data: previewStatus, refetch: refetchPreviewStatus } = useQuery({
+    queryKey: ['preview-status', projectId],
+    queryFn: () => projectId ? workspaceApi.getPreviewStatus(projectId) : null,
+    enabled: !!projectId,
+    refetchInterval: 5000,
+  });
+
+  // Start preview server mutation
+  const startPreviewMutation = useMutation({
+    mutationFn: (id: string) => workspaceApi.startPreview(id),
+    onSuccess: () => {
+      refetchPreviewStatus();
+    },
+  });
+
   if (error) {
     console.error('[UIPreview] Error fetching design concepts:', error);
   }
 
-  // Select design mutation
+  // Select design mutation (for G4 mockup selection)
   const selectDesignMutation = useMutation({
     mutationFn: (conceptId: string) => documentsApi.selectDesignConcept(conceptId),
     onSuccess: () => {
@@ -664,24 +688,146 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
     },
   });
 
-  // Get current design
   const currentDesign = designConcepts?.[selectedDesignIndex];
+
+  // Check if workspace has previewable frontend code (G5 started/completed)
+  // Only return true for projects that have a frontend (not backend-only)
+  const hasWorkspaceCode = useMemo(() => {
+    if (!workspaceTree?.children) return false;
+
+    const children = workspaceTree.children;
+    const childNames = children.map(n => n.name);
+
+    // Check for fullstack project with frontend/ folder
+    if (childNames.includes('frontend')) {
+      return true;
+    }
+
+    // Check for frontend indicators (vite, react, nextjs, etc.)
+    const frontendIndicators = [
+      'vite.config.ts',
+      'vite.config.js',
+      'next.config.js',
+      'next.config.mjs',
+      'index.html',
+      'public', // Usually indicates frontend
+    ];
+
+    const hasFrontendIndicator = frontendIndicators.some(indicator =>
+      childNames.includes(indicator)
+    );
+
+    // Check for backend-only indicators (nestjs, express without frontend)
+    const backendOnlyIndicators = ['nest-cli.json'];
+    const isBackendOnly = backendOnlyIndicators.some(indicator =>
+      childNames.includes(indicator)
+    ) && !hasFrontendIndicator;
+
+    // Has frontend code if it has indicators and is not backend-only
+    return hasFrontendIndicator || (childNames.includes('src') && childNames.includes('package.json') && !isBackendOnly);
+  }, [workspaceTree]);
+
+  // Check if this is a backend-only project (has code but no frontend)
+  const isBackendOnlyProject = useMemo(() => {
+    if (!workspaceTree?.children) return false;
+
+    const childNames = workspaceTree.children.map(n => n.name);
+    const hasCode = childNames.includes('src') && childNames.includes('package.json');
+    const hasBackendIndicator = childNames.includes('nest-cli.json');
+    const hasFrontendIndicator = [
+      'vite.config.ts', 'vite.config.js', 'next.config.js', 'next.config.mjs', 'index.html', 'frontend'
+    ].some(f => childNames.includes(f));
+
+    return hasCode && hasBackendIndicator && !hasFrontendIndicator;
+  }, [workspaceTree]);
 
   // Check if the design HTML is complete enough to display
   const isDesignComplete = useMemo(() => {
-    if (!currentDesign?.html) return false;
-    const html = currentDesign.html;
+    const html = currentDesign?.html;
+    if (!html) return false;
     const hasStructure = html.includes('<div') || html.includes('<section') || html.includes('<main') || html.includes('<body');
     const hasSubstantialContent = html.length > 200;
     return hasStructure && hasSubstantialContent;
-  }, [currentDesign?.html]);
+  }, [currentDesign]);
 
-  // Show placeholder if no designs yet or still loading
+  // Handle design selection change (G4 only)
+  const handleDesignChange = (index: number) => {
+    setSelectedDesignIndex(index);
+    const concept = designConcepts?.[index];
+    if (concept && !concept.isSelected) {
+      selectDesignMutation.mutate(concept.id);
+    }
+  };
+
+  // Track retry attempts for auto-restart on errors
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 5000; // 5 seconds between retries
+
+  // Derive retry state from preview status to avoid effect-based state updates
+  // The server keeps track of retry attempts, we just display appropriate messages based on status
+  const isPreviewError = previewStatus?.status === 'error';
+  const isPreviewStopped = previewStatus?.status === 'stopped' || !previewStatus?.status;
+
+  // Track last retry time with a ref (only used inside effects, not during render)
+  const lastRetryTimeRef = useRef<number>(0);
+  const retryAttemptRef = useRef<number>(0);
+  const prevProjectIdRef = useRef<string | null>(null);
+
+  // Auto-start preview server when code exists and server is not running
+  // Also auto-retry on errors (up to MAX_RETRIES times)
+  useEffect(() => {
+    // Reset retry count when project changes
+    if (prevProjectIdRef.current !== projectId) {
+      retryAttemptRef.current = 0;
+      lastRetryTimeRef.current = 0;
+      prevProjectIdRef.current = projectId ?? null;
+    }
+
+    if (!projectId || !hasWorkspaceCode || startPreviewMutation.isPending) {
+      return;
+    }
+
+    // Server is running - all good, reset retry count
+    if (previewStatus?.running) {
+      retryAttemptRef.current = 0;
+      return;
+    }
+
+    // Server is starting - wait for it
+    if (previewStatus?.status === 'starting') {
+      return;
+    }
+
+    // Server errored or stopped - check if we should retry
+    if (isPreviewError || isPreviewStopped) {
+      const now = Date.now();
+      const timeSinceLastRetry = now - lastRetryTimeRef.current;
+
+      // Check retry limits
+      if (retryAttemptRef.current >= MAX_RETRIES) {
+        console.log('[UIPreview] Max retries reached, not auto-starting');
+        return;
+      }
+
+      // Enforce delay between retries (except for first attempt)
+      if (retryAttemptRef.current > 0 && timeSinceLastRetry < RETRY_DELAY_MS) {
+        return;
+      }
+
+      // Start/retry the server
+      retryAttemptRef.current += 1;
+      lastRetryTimeRef.current = now;
+      console.log(`[UIPreview] ${isPreviewError ? 'Retrying' : 'Auto-starting'} preview server (attempt ${retryAttemptRef.current}/${MAX_RETRIES})`);
+      startPreviewMutation.mutate(projectId);
+    }
+  }, [projectId, hasWorkspaceCode, previewStatus?.running, previewStatus?.status, isPreviewError, isPreviewStopped, startPreviewMutation]);
+
+  // Loading state
   if (!projectId || isLoading) {
     return (
       <div className="h-full flex flex-col">
         <div className={`flex-1 rounded-2xl overflow-hidden ${isDark ? 'border bg-slate-900/50 border-slate-700/50' : 'border border-slate-200 bg-white'}`}>
-          <div className={`h-full flex items-center justify-center p-8`}>
+          <div className="h-full flex items-center justify-center p-8">
             <div className="text-center">
               <div className={`w-20 h-20 mx-auto mb-4 rounded-2xl flex items-center justify-center ${isDark ? 'bg-teal-500/20' : 'bg-teal-100'}`}>
                 <ComputerDesktopIcon className={`w-10 h-10 ${isDark ? 'text-teal-400' : 'text-teal-500'}`} />
@@ -694,25 +840,168 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
     );
   }
 
-  // Show waiting state if no designs or design is incomplete
-  const hasDesigns = designConcepts && designConcepts.length > 0;
-  if (!hasDesigns || !isDesignComplete) {
-    const isInProgress = hasDesigns && !isDesignComplete;
+  // ============================================================
+  // G5+ : Code exists - Show LIVE APP PREVIEW (auto-starts)
+  // ============================================================
+  if (hasWorkspaceCode) {
+    const isStarting = previewStatus?.status === 'starting' || startPreviewMutation.isPending;
+    const isError = previewStatus?.status === 'error';
+    const isRetrying = isError && isStarting; // Retrying when error + starting
+
     return (
       <div className="h-full flex flex-col">
         <div className={`flex-1 rounded-2xl overflow-hidden ${isDark ? 'border bg-slate-900/50 border-slate-700/50' : 'border border-slate-200 bg-white'}`}>
-          <div className={`h-full flex items-center justify-center p-8`}>
+          {/* Browser chrome header */}
+          <div className={`flex items-center gap-3 px-4 py-3 ${isDark ? 'border-b bg-slate-800/50 border-slate-700/50' : 'border-b border-slate-200 bg-slate-50'}`}>
+            <div className="flex gap-1.5">
+              <div className="w-3 h-3 rounded-full bg-red-400" />
+              <div className="w-3 h-3 rounded-full bg-amber-400" />
+              <div className="w-3 h-3 rounded-full bg-emerald-400" />
+            </div>
+
+            {/* URL bar */}
+            <div className={`flex-1 rounded-lg px-4 py-2 flex items-center justify-center ${isDark ? 'bg-slate-900/50' : 'bg-white border border-slate-200'}`}>
+              {previewStatus?.running ? (
+                <span className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {previewStatus.url}
+                </span>
+              ) : isStarting ? (
+                <span className={`text-sm ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
+                  {isRetrying ? 'Retrying...' : 'Starting server...'}
+                </span>
+              ) : isError ? (
+                <span className={`text-sm ${isDark ? 'text-red-400' : 'text-red-600'}`}>
+                  Error - will retry automatically
+                </span>
+              ) : (
+                <span className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Initializing...
+                </span>
+              )}
+            </div>
+
+            {/* Status indicator */}
+            <div className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+              previewStatus?.running
+                ? isDark ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-600'
+                : isError
+                  ? isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-600'
+                  : isStarting
+                    ? isDark ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-600'
+                    : isDark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'
+            }`}>
+              {previewStatus?.running ? 'Live' : isError ? 'Error' : isStarting ? 'Starting' : 'Waiting'}
+            </div>
+          </div>
+
+          {/* Live app preview content */}
+          <div className="h-[calc(100%-60px)] w-full bg-white">
+            {previewStatus?.running && previewStatus.url ? (
+              <iframe
+                src={previewStatus.url}
+                title="Live App Preview"
+                className="w-full h-full border-0"
+              />
+            ) : (
+              <div className={`h-full flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+                <div className="text-center">
+                  {/* Animated loading spinner or error icon */}
+                  <div className={`w-16 h-16 mx-auto mb-4 rounded-xl flex items-center justify-center ${
+                    isError
+                      ? isDark ? 'bg-red-500/20' : 'bg-red-100'
+                      : isDark ? 'bg-teal-500/20' : 'bg-teal-100'
+                  }`}>
+                    {isStarting ? (
+                      <svg className={`w-8 h-8 animate-spin ${isDark ? 'text-teal-400' : 'text-teal-500'}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    ) : isError ? (
+                      <XMarkIcon className={`w-8 h-8 ${isDark ? 'text-red-400' : 'text-red-500'}`} />
+                    ) : (
+                      <ComputerDesktopIcon className={`w-8 h-8 ${isDark ? 'text-teal-400' : 'text-teal-500'}`} />
+                    )}
+                  </div>
+                  <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-slate-700'}`}>
+                    {isError
+                      ? 'Preview Server Error'
+                      : isStarting
+                        ? (isRetrying ? 'Retrying Preview Server...' : 'Starting Preview Server...')
+                        : 'Preparing Preview'}
+                  </h3>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    {isError
+                      ? 'Something went wrong. Will retry automatically...'
+                      : isStarting
+                        ? 'Installing dependencies and starting the dev server. This may take a moment.'
+                        : 'The preview will start automatically.'}
+                  </p>
+                  {/* Show last error from logs if available */}
+                  {isError && previewStatus?.logs && previewStatus.logs.length > 0 && (
+                    <div className={`mt-4 p-3 rounded-lg text-left max-w-md mx-auto ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                      <p className={`text-xs font-mono ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        {previewStatus.logs[previewStatus.logs.length - 1]?.substring(0, 200)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================
+  // Backend-only project - Show API info instead of preview
+  // ============================================================
+  if (isBackendOnlyProject) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className={`flex-1 rounded-2xl overflow-hidden ${isDark ? 'border bg-slate-900/50 border-slate-700/50' : 'border border-slate-200 bg-white'}`}>
+          <div className="h-full flex items-center justify-center p-8">
+            <div className="text-center max-w-md">
+              <div className={`w-20 h-20 mx-auto mb-4 rounded-2xl flex items-center justify-center ${isDark ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
+                <CodeBracketIcon className={`w-10 h-10 ${isDark ? 'text-purple-400' : 'text-purple-500'}`} />
+              </div>
+              <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-slate-700'}`}>Backend API Project</h3>
+              <p className={`text-sm mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                This is a backend-only project without a visual UI. You can test the API endpoints using tools like Postman or the Swagger documentation.
+              </p>
+              <div className={`p-4 rounded-lg ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                <p className={`text-xs font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Available in Code tab:</p>
+                <ul className={`text-xs text-left space-y-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <li>• API endpoints and controllers</li>
+                  <li>• Database models and services</li>
+                  <li>• Authentication and middleware</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================
+  // G4 or earlier: Show DESIGN MOCKUPS
+  // ============================================================
+  const hasDesigns = designConcepts && designConcepts.length > 0;
+
+  // No designs yet - waiting state
+  if (!hasDesigns) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className={`flex-1 rounded-2xl overflow-hidden ${isDark ? 'border bg-slate-900/50 border-slate-700/50' : 'border border-slate-200 bg-white'}`}>
+          <div className="h-full flex items-center justify-center p-8">
             <div className="text-center">
               <div className={`w-20 h-20 mx-auto mb-4 rounded-2xl flex items-center justify-center ${isDark ? 'bg-teal-500/20' : 'bg-teal-100'}`}>
                 <ComputerDesktopIcon className={`w-10 h-10 ${isDark ? 'text-teal-400' : 'text-teal-500'}`} />
               </div>
-              <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-slate-700'}`}>
-                {isInProgress ? 'Creating Designs...' : 'UI Preview'}
-              </h3>
+              <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-slate-700'}`}>UI Preview</h3>
               <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                {isInProgress
-                  ? 'The UX/UI Designer is creating your design mockups. This will update automatically when ready.'
-                  : 'Design previews will appear here after the UX/UI Designer agent runs (G4).'}
+                Design previews will appear here after the UX/UI Designer agent runs (G4).
               </p>
             </div>
           </div>
@@ -721,15 +1010,7 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
     );
   }
 
-  // Handle design selection change
-  const handleDesignChange = (index: number) => {
-    setSelectedDesignIndex(index);
-    const concept = designConcepts[index];
-    if (concept && !concept.isSelected) {
-      selectDesignMutation.mutate(concept.id);
-    }
-  };
-
+  // Design mockup view (G4)
   return (
     <div className="h-full flex flex-col">
       <div className={`flex-1 rounded-2xl overflow-hidden ${isDark ? 'border bg-slate-900/50 border-slate-700/50' : 'border border-slate-200 bg-white'}`}>
@@ -740,6 +1021,8 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
             <div className="w-3 h-3 rounded-full bg-amber-400" />
             <div className="w-3 h-3 rounded-full bg-emerald-400" />
           </div>
+
+          {/* URL bar with design selector */}
           <div className={`flex-1 rounded-lg px-4 py-2 flex items-center justify-center ${isDark ? 'bg-slate-900/50' : 'bg-white border border-slate-200'}`}>
             <span className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>preview://</span>
             {designConcepts.length > 1 ? (
@@ -762,15 +1045,29 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
           </div>
         </div>
 
-        {/* Design preview iframe */}
+        {/* Design mockup content */}
         <div className="h-[calc(100%-60px)] w-full bg-white">
-          {currentDesign && (
+          {currentDesign && isDesignComplete ? (
             <iframe
               srcDoc={currentDesign.html}
               title={currentDesign.name}
               className="w-full h-full border-0"
               sandbox="allow-scripts allow-same-origin"
             />
+          ) : (
+            <div className={`h-full flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+              <div className="text-center">
+                <div className={`w-16 h-16 mx-auto mb-4 rounded-xl flex items-center justify-center ${isDark ? 'bg-teal-500/20' : 'bg-teal-100'}`}>
+                  <ComputerDesktopIcon className={`w-8 h-8 ${isDark ? 'text-teal-400' : 'text-teal-500'}`} />
+                </div>
+                <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-white' : 'text-slate-700'}`}>
+                  Creating Designs...
+                </h3>
+                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  The UX/UI Designer is creating your design mockups. This will update automatically when ready.
+                </p>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -980,137 +1277,40 @@ const DocsContent = ({ theme, projectId, autoSelectDocumentKey }: { theme: Theme
   );
 };
 
-// Compute "recently modified" cutoff once at module load time (not during render)
-// This avoids Date.now() calls during React render which violates purity rules
-const FIVE_MINUTES_AGO = new Date(Date.now() - 5 * 60 * 1000);
-
-const CodeContent = ({ theme, projectId }: { theme: ThemeMode; projectId: string | null }) => {
+const CodeContent = ({ theme, projectId, renderChat }: { theme: ThemeMode; projectId: string | null; renderChat?: () => React.ReactNode }) => {
   const isDark = theme === 'dark';
   const [selectedFile, setSelectedFile] = useState<FileTreeNode | null>(null);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['/docs', '/.fuzzyllama']));
+  const [selectedFileContent, setSelectedFileContent] = useState<string | null>(null);
+  const [isLoadingContent, setIsLoadingContent] = useState(false);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['docs', '.fuzzyllama', 'frontend', 'backend', 'src']));
 
-  // Fetch real documents from API
-  const { data: apiDocuments, isLoading } = useQuery({
+  // Fetch workspace file tree (actual source code)
+  const { data: workspaceTree, isLoading: isLoadingWorkspace } = useQuery({
+    queryKey: ['workspace-tree', projectId],
+    queryFn: () => projectId ? workspaceApi.getTree(projectId) : Promise.resolve(null),
+    enabled: !!projectId,
+  });
+
+  // Fetch documents (markdown docs from database)
+  const { data: apiDocuments, isLoading: isLoadingDocs } = useQuery({
     queryKey: ['documents', projectId],
     queryFn: () => projectId ? documentsApi.list(projectId) : Promise.resolve([]),
     enabled: !!projectId,
   });
 
-  // Code tab shows ALL documents (working tree) - no filtering
-  const allDocuments = useMemo(() => apiDocuments || [], [apiDocuments]);
+  const isLoading = isLoadingWorkspace || isLoadingDocs;
 
-  // Map document types and titles to folder structure
-  const getDocumentFolder = (doc: Document): string => {
-    const titleLower = doc.title.toLowerCase();
-
-    // Internal/system files go in .fuzzyllama folder
-    if (titleLower.includes('cost-log') || titleLower.includes('cost log') ||
-        titleLower.includes('feedback-log') || titleLower.includes('feedback log') ||
-        titleLower.includes('agent-log') || titleLower.includes('agent log') ||
-        titleLower.includes('orchestrator-output') || titleLower.includes('orchestrator output') ||
-        titleLower.includes('project-context') || titleLower.includes('project context')) {
-      return '/.fuzzyllama';
-    }
-
-    // Main documents go in /docs
-    return '/docs';
-  };
-
-  // Convert title to filename
-  const toFileName = (title: string): string => {
-    return `${title.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-')}.md`;
-  };
-
-  // Build hierarchical file tree from documents
-  const buildFileTree = useCallback((documents: Document[]): FileTreeNode[] => {
-    if (documents.length === 0) {
-      return [];
-    }
-
-    // Group documents by folder
-    const folderMap = new Map<string, Document[]>();
-    for (const doc of documents) {
-      const folder = getDocumentFolder(doc);
-      if (!folderMap.has(folder)) {
-        folderMap.set(folder, []);
-      }
-      folderMap.get(folder)!.push(doc);
-    }
-
-    // Build tree structure
-    const tree: FileTreeNode[] = [];
-
-    // Create /docs folder if it has documents
-    const docsFolder = folderMap.get('/docs');
-    if (docsFolder && docsFolder.length > 0) {
-      const docsChildren = docsFolder.map((doc) => ({
-        name: toFileName(doc.title),
-        type: 'file' as const,
-        path: `/docs/${toFileName(doc.title)}`,
-        content: doc.content || '',
-        updatedAt: new Date(doc.updatedAt),
-        documentId: doc.id,
-        documentType: doc.documentType,
-      }));
-
-      // Sort by document type priority then name
-      docsChildren.sort((a, b) => {
-        const priorityOrder = ['REQUIREMENTS', 'ARCHITECTURE', 'DESIGN', 'CODE', 'TEST', 'SECURITY', 'DEPLOYMENT'];
-        const priorityA = priorityOrder.indexOf(a.documentType || '') === -1 ? 99 : priorityOrder.indexOf(a.documentType || '');
-        const priorityB = priorityOrder.indexOf(b.documentType || '') === -1 ? 99 : priorityOrder.indexOf(b.documentType || '');
-        if (priorityA !== priorityB) return priorityA - priorityB;
-        return a.name.localeCompare(b.name);
-      });
-
-      tree.push({
-        name: 'docs',
-        type: 'folder',
-        path: '/docs',
-        children: docsChildren,
-      });
-    }
-
-    // Create /.fuzzyllama folder for internal files
-    const internalFolder = folderMap.get('/.fuzzyllama');
-    if (internalFolder && internalFolder.length > 0) {
-      const internalChildren = internalFolder.map((doc) => ({
-        name: toFileName(doc.title),
-        type: 'file' as const,
-        path: `/.fuzzyllama/${toFileName(doc.title)}`,
-        content: doc.content || '',
-        updatedAt: new Date(doc.updatedAt),
-        documentId: doc.id,
-        documentType: doc.documentType,
-      }));
-
-      // Sort alphabetically
-      internalChildren.sort((a, b) => a.name.localeCompare(b.name));
-
-      tree.push({
-        name: '.fuzzyllama',
-        type: 'folder',
-        path: '/.fuzzyllama',
-        children: internalChildren,
-      });
-    }
-
-    return tree;
+  // Convert backend DirectoryNode to FileTreeNode
+  const convertToFileTreeNode = useCallback((node: DirectoryNode, isWorkspaceFile: boolean = true): FileTreeNode => {
+    return {
+      name: node.name,
+      type: node.type === 'directory' ? 'folder' : 'file',
+      path: node.path,
+      children: node.children?.map(child => convertToFileTreeNode(child, isWorkspaceFile)),
+      // Mark workspace files so we know to fetch content from API
+      documentType: isWorkspaceFile ? 'WORKSPACE' : undefined,
+    };
   }, []);
-
-  const fileTree = buildFileTree(allDocuments);
-
-  // Check if a file was recently modified (uses module-level constant)
-  const checkRecentlyModified = (updatedAt: Date | undefined): boolean => {
-    return updatedAt ? updatedAt > FIVE_MINUTES_AGO : false;
-  };
-
-  // Count modified files in tree (for folder badge)
-  const countModifiedInFolder = (node: FileTreeNode): number => {
-    if (node.type === 'file') {
-      return checkRecentlyModified(node.updatedAt) ? 1 : 0;
-    }
-    return node.children?.reduce((sum, child) => sum + countModifiedInFolder(child), 0) || 0;
-  };
 
   // Toggle folder expansion
   const toggleFolder = (path: string) => {
@@ -1125,58 +1325,193 @@ const CodeContent = ({ theme, projectId }: { theme: ThemeMode; projectId: string
     });
   };
 
-  // Get file icon based on document type
-  const getFileIcon = (node: FileTreeNode) => {
-    const docType = node.documentType;
-    const iconColors: Record<string, string> = {
-      'REQUIREMENTS': isDark ? 'text-blue-400' : 'text-blue-600',
-      'ARCHITECTURE': isDark ? 'text-purple-400' : 'text-purple-600',
-      'DESIGN': isDark ? 'text-pink-400' : 'text-pink-600',
-      'TECHNICAL': isDark ? 'text-cyan-400' : 'text-cyan-600',
-      'CODE': isDark ? 'text-green-400' : 'text-green-600',
-      'TEST': isDark ? 'text-yellow-400' : 'text-yellow-600',
-      'SECURITY': isDark ? 'text-red-400' : 'text-red-600',
-      'DEPLOYMENT': isDark ? 'text-orange-400' : 'text-orange-600',
-      'OTHER': isDark ? 'text-slate-400' : 'text-slate-500',
+  // Get file extension color
+  const getFileExtensionColor = (filename: string): string => {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    const colors: Record<string, string> = {
+      'ts': isDark ? 'text-blue-400' : 'text-blue-600',
+      'tsx': isDark ? 'text-blue-400' : 'text-blue-600',
+      'js': isDark ? 'text-yellow-400' : 'text-yellow-600',
+      'jsx': isDark ? 'text-yellow-400' : 'text-yellow-600',
+      'json': isDark ? 'text-amber-400' : 'text-amber-600',
+      'md': isDark ? 'text-slate-400' : 'text-slate-500',
+      'css': isDark ? 'text-pink-400' : 'text-pink-600',
+      'scss': isDark ? 'text-pink-400' : 'text-pink-600',
+      'html': isDark ? 'text-orange-400' : 'text-orange-600',
+      'env': isDark ? 'text-green-400' : 'text-green-600',
+      'yml': isDark ? 'text-purple-400' : 'text-purple-600',
+      'yaml': isDark ? 'text-purple-400' : 'text-purple-600',
+      'dockerfile': isDark ? 'text-cyan-400' : 'text-cyan-600',
+      'prisma': isDark ? 'text-teal-400' : 'text-teal-600',
     };
-    const color = docType ? iconColors[docType] || iconColors['OTHER'] : (isDark ? 'text-slate-400' : 'text-slate-500');
+    return colors[ext || ''] || (isDark ? 'text-slate-400' : 'text-slate-500');
+  };
+
+  // Map document types and titles to folder structure
+  const getDocumentFolder = (doc: Document): string => {
+    const titleLower = doc.title.toLowerCase();
+    if (titleLower.includes('cost-log') || titleLower.includes('cost log') ||
+        titleLower.includes('feedback-log') || titleLower.includes('feedback log') ||
+        titleLower.includes('agent-log') || titleLower.includes('agent log') ||
+        titleLower.includes('orchestrator-output') || titleLower.includes('orchestrator output') ||
+        titleLower.includes('project-context') || titleLower.includes('project context')) {
+      return '.fuzzyllama';
+    }
+    return 'docs';
+  };
+
+  // Convert title to filename
+  const toFileName = (title: string): string => {
+    return `${title.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-')}.md`;
+  };
+
+  // Build unified file tree combining workspace files and documents
+  const fileTree = useMemo((): FileTreeNode[] => {
+    const tree: FileTreeNode[] = [];
+
+    // Add workspace source code (frontend, backend, etc.)
+    if (workspaceTree?.children) {
+      for (const child of workspaceTree.children) {
+        tree.push(convertToFileTreeNode(child, true));
+      }
+    }
+
+    // Add documents from database
+    const documents = apiDocuments || [];
+    if (documents.length > 0) {
+      // Group documents by folder
+      const folderMap = new Map<string, Document[]>();
+      for (const doc of documents) {
+        const folder = getDocumentFolder(doc);
+        if (!folderMap.has(folder)) {
+          folderMap.set(folder, []);
+        }
+        folderMap.get(folder)!.push(doc);
+      }
+
+      // Create docs folder
+      const docsFolder = folderMap.get('docs');
+      if (docsFolder && docsFolder.length > 0) {
+        const existingDocs = tree.find(n => n.name === 'docs');
+        const docsChildren = docsFolder.map((doc) => ({
+          name: toFileName(doc.title),
+          type: 'file' as const,
+          path: `docs/${toFileName(doc.title)}`,
+          content: doc.content || '',
+          updatedAt: new Date(doc.updatedAt),
+          documentId: doc.id,
+          documentType: doc.documentType,
+        }));
+
+        if (existingDocs) {
+          existingDocs.children = [...(existingDocs.children || []), ...docsChildren];
+        } else {
+          tree.push({
+            name: 'docs',
+            type: 'folder',
+            path: 'docs',
+            children: docsChildren,
+          });
+        }
+      }
+
+      // Create .fuzzyllama folder for internal files
+      const internalFolder = folderMap.get('.fuzzyllama');
+      if (internalFolder && internalFolder.length > 0) {
+        tree.push({
+          name: '.fuzzyllama',
+          type: 'folder',
+          path: '.fuzzyllama',
+          children: internalFolder.map((doc) => ({
+            name: toFileName(doc.title),
+            type: 'file' as const,
+            path: `.fuzzyllama/${toFileName(doc.title)}`,
+            content: doc.content || '',
+            updatedAt: new Date(doc.updatedAt),
+            documentId: doc.id,
+            documentType: doc.documentType,
+          })),
+        });
+      }
+    }
+
+    // Sort: folders first, then files, alphabetically
+    const sortNodes = (nodes: FileTreeNode[]): FileTreeNode[] => {
+      return nodes.sort((a, b) => {
+        if (a.type === 'folder' && b.type !== 'folder') return -1;
+        if (a.type !== 'folder' && b.type === 'folder') return 1;
+        return a.name.localeCompare(b.name);
+      }).map(node => ({
+        ...node,
+        children: node.children ? sortNodes(node.children) : undefined,
+      }));
+    };
+
+    return sortNodes(tree);
+  }, [workspaceTree, apiDocuments, convertToFileTreeNode]);
+
+  // Handle file selection - fetch content if needed
+  const handleFileSelect = useCallback(async (node: FileTreeNode) => {
+    setSelectedFile(node);
+
+    // If it's a document with content already, use that
+    if (node.content) {
+      setSelectedFileContent(node.content);
+      return;
+    }
+
+    // If it's a workspace file, fetch content from API
+    if (node.documentType === 'WORKSPACE' && projectId) {
+      setIsLoadingContent(true);
+      try {
+        const result = await workspaceApi.readFile(projectId, node.path);
+        setSelectedFileContent(result.content);
+      } catch (err) {
+        setSelectedFileContent(`Error loading file: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      } finally {
+        setIsLoadingContent(false);
+      }
+    }
+  }, [projectId]);
+
+  // Get file icon based on extension or document type
+  const getFileIcon = (node: FileTreeNode) => {
+    if (node.type === 'folder') {
+      return <FolderIcon className={`w-4 h-4 ${isDark ? 'text-amber-400' : 'text-amber-500'}`} />;
+    }
+    const color = node.documentType && node.documentType !== 'WORKSPACE'
+      ? (isDark ? 'text-slate-400' : 'text-slate-500')
+      : getFileExtensionColor(node.name);
     return <DocumentTextIcon className={`w-4 h-4 ${color}`} />;
   };
 
   // Render a folder node
   const renderFolderNode = (node: FileTreeNode, depth: number = 0) => {
-    const isExpanded = expandedFolders.has(node.path);
-    const modifiedCount = countModifiedInFolder(node);
+    const isExpanded = expandedFolders.has(node.name) || expandedFolders.has(node.path);
     const paddingLeft = depth * 12;
 
     return (
       <div key={node.path}>
         <button
-          onClick={() => toggleFolder(node.path)}
+          onClick={() => toggleFolder(node.name)}
           className={`w-full flex items-center gap-1.5 py-1 px-2 rounded text-left transition-all ${
             isDark ? 'hover:bg-slate-800/50 text-slate-300' : 'hover:bg-slate-100 text-slate-700'
           }`}
           style={{ paddingLeft: `${paddingLeft + 8}px` }}
         >
-          {/* Chevron */}
           <ChevronRightIcon
             className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''} ${
               isDark ? 'text-slate-500' : 'text-slate-400'
             }`}
           />
-          {/* Folder icon */}
           <FolderIcon className={`w-4 h-4 ${isDark ? 'text-amber-400' : 'text-amber-500'}`} />
           <span className="text-xs flex-1">{node.name}</span>
-          {/* Modified count badge */}
-          {modifiedCount > 0 && (
-            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-              isDark ? 'bg-green-900/50 text-green-400' : 'bg-green-100 text-green-600'
-            }`}>
-              {modifiedCount}M
+          {node.children && (
+            <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              {node.children.length}
             </span>
           )}
         </button>
-        {/* Children */}
         {isExpanded && node.children && (
           <div>
             {node.children.map(child =>
@@ -1193,13 +1528,12 @@ const CodeContent = ({ theme, projectId }: { theme: ThemeMode; projectId: string
   // Render a file node
   const renderFileNode = (node: FileTreeNode, depth: number = 0) => {
     const isSelected = selectedFile?.path === node.path;
-    const isRecentlyModified = checkRecentlyModified(node.updatedAt);
-    const paddingLeft = depth * 12 + 20; // Extra indent for files under folders
+    const paddingLeft = depth * 12 + 20;
 
     return (
       <button
         key={node.path}
-        onClick={() => setSelectedFile(node)}
+        onClick={() => handleFileSelect(node)}
         className={`w-full flex items-center gap-2 py-1 px-2 rounded text-left transition-all ${
           isSelected
             ? isDark ? 'bg-teal-900/30 text-teal-300' : 'bg-teal-100 text-teal-700'
@@ -1211,14 +1545,6 @@ const CodeContent = ({ theme, projectId }: { theme: ThemeMode; projectId: string
         <span className={`text-xs flex-1 truncate ${isSelected ? 'font-medium' : ''}`}>
           {node.name}
         </span>
-        {/* Modified indicator */}
-        {isRecentlyModified && (
-          <span className={`text-[10px] font-semibold ${
-            isDark ? 'text-green-400' : 'text-green-600'
-          }`} title="Modified this gate">
-            M
-          </span>
-        )}
       </button>
     );
   };
@@ -1245,43 +1571,84 @@ const CodeContent = ({ theme, projectId }: { theme: ThemeMode; projectId: string
     );
   }
 
+  // Tree-style layout with file tree on left and content/chat on right
   return (
     <div className="h-full flex gap-4">
-      <div className={`w-56 rounded-2xl p-3 overflow-auto border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
+      {/* File tree panel - wider to avoid truncation */}
+      <div className={`w-72 flex-shrink-0 rounded-2xl p-3 overflow-auto border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
         <div className={`flex items-center gap-2 px-2 py-1.5 mb-2 border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
           <CodeBracketIcon className={`w-4 h-4 ${isDark ? 'text-teal-400' : 'text-teal-500'}`} />
           <span className={`text-xs font-semibold ${isDark ? 'text-white' : 'text-slate-700'}`}>Files</span>
         </div>
         <div className="space-y-0.5">
-          {fileTree.map(node =>
-            node.type === 'folder'
-              ? renderFolderNode(node)
-              : renderFileNode(node)
+          {fileTree.length > 0 ? (
+            fileTree.map(node =>
+              node.type === 'folder'
+                ? renderFolderNode(node)
+                : renderFileNode(node)
+            )
+          ) : (
+            <p className={`text-xs px-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              No files generated yet
+            </p>
           )}
         </div>
       </div>
-      <div className={`flex-1 rounded-2xl overflow-hidden border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
-        {selectedFile ? (
-          <>
+
+      {/* Content area - shows chat when no file selected, or split view when file selected */}
+      {selectedFile ? (
+        // Split view: 50% file content / 50% chat - responsive
+        <div className="flex-1 flex gap-3 min-w-0">
+          {/* File content panel - 50% width */}
+          <div className={`w-1/2 min-w-0 rounded-2xl overflow-hidden border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
             <div className={`flex items-center gap-2 px-4 py-2 border-b ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-slate-50 border-slate-200'}`}>
               {getFileIcon(selectedFile)}
-              <span className={`text-xs font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{selectedFile.path}</span>
+              <span className={`text-xs font-mono flex-1 truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{selectedFile.path}</span>
+              <button
+                onClick={() => {
+                  setSelectedFile(null);
+                  setSelectedFileContent(null);
+                }}
+                className={`w-5 h-5 flex items-center justify-center rounded flex-shrink-0 ${isDark ? 'text-slate-500 hover:text-white hover:bg-slate-700' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'}`}
+              >
+                ×
+              </button>
             </div>
-            <div className={`p-5 overflow-auto h-full ${isDark ? '' : 'bg-white'}`}>
-              <pre className={`whitespace-pre-wrap text-sm leading-relaxed font-mono ${isDark ? 'text-teal-200' : 'text-slate-600'}`}>
-                {selectedFile.content}
-              </pre>
-            </div>
-          </>
-        ) : (
-          <div className={`h-full flex items-center justify-center ${isDark ? '' : 'bg-white'}`}>
-            <div className="text-center">
-              <DocumentTextIcon className={`w-12 h-12 mx-auto mb-3 ${isDark ? 'text-teal-600' : 'text-teal-400'}`} />
-              <p className={`text-sm ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>Select a file to view</p>
+            <div className={`p-5 overflow-auto h-[calc(100%-40px)] ${isDark ? '' : 'bg-white'}`}>
+              {isLoadingContent ? (
+                <div className="flex items-center justify-center h-32">
+                  <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                <pre className={`whitespace-pre-wrap text-sm leading-relaxed font-mono ${isDark ? 'text-teal-200' : 'text-slate-600'}`}>
+                  {selectedFileContent || selectedFile.content || ''}
+                </pre>
+              )}
             </div>
           </div>
-        )}
-      </div>
+
+          {/* Chat panel - 50% width */}
+          {renderChat && (
+            <div className="w-1/2 min-w-0">
+              {renderChat()}
+            </div>
+          )}
+        </div>
+      ) : (
+        // Full width chat when no file selected
+        <div className="flex-1">
+          {renderChat ? (
+            renderChat()
+          ) : (
+            <div className={`h-full rounded-2xl flex items-center justify-center border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
+              <div className="text-center">
+                <DocumentTextIcon className={`w-12 h-12 mx-auto mb-3 ${isDark ? 'text-teal-600' : 'text-teal-400'}`} />
+                <p className={`text-sm ${isDark ? 'text-teal-400' : 'text-slate-500'}`}>Select a file to view</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -2840,10 +3207,10 @@ export default function UnifiedDashboard() {
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const isDark = theme === 'dark';
 
-  // Agent streaming state
-  const [activeAgent, setActiveAgent] = useState<{ agentType: string; taskDescription?: string } | null>(null);
+  // Agent streaming state - supports multiple parallel agents
+  const [activeAgents, setActiveAgents] = useState<Map<string, { agentType: string; taskDescription?: string; startedAt: number }>>(new Map());
   const [streamingChunks, setStreamingChunks] = useState<string[]>([]);
-  const [isAgentWorking, setIsAgentWorking] = useState(false);
+  const isAgentWorking = activeAgents.size > 0;
   const [isStreamingDocument, setIsStreamingDocument] = useState(false);
   const [agentEvents, setAgentEvents] = useState<Array<{ agentId: string; result?: unknown; timestamp: string }>>([]);
   const [chatMessages, setChatMessages] = useState<Array<{ id: string; role: 'assistant' | 'system'; content: string; timestamp: string }>>([]);
@@ -2872,46 +3239,38 @@ export default function UnifiedDashboard() {
   }, []);
 
   // WebSocket event handlers
-  const handleAgentStarted = useCallback((event: { agentType?: string; taskDescription?: string }) => {
+  const handleAgentStarted = useCallback((event: { agentId?: string; agentType?: string; taskDescription?: string }) => {
     console.log('Agent started:', event);
 
-    // Prioritize non-ORCHESTRATOR agents since they do the actual work
-    // ORCHESTRATOR coordinates and sends chat messages, but we want to show the worker agent
-    setActiveAgent((currentAgent) => {
-      const newAgentType = event.agentType || 'UNKNOWN';
+    const agentType = event.agentType || 'UNKNOWN';
+    const agentKey = event.agentId || agentType; // Use agentId if available, fallback to type
 
-      // If no current agent, or current agent is ORCHESTRATOR and new one isn't, use new agent
-      if (
-        !currentAgent ||
-        (currentAgent.agentType === 'ORCHESTRATOR' && newAgentType !== 'ORCHESTRATOR')
-      ) {
-        return {
-          agentType: newAgentType,
-          taskDescription: event.taskDescription,
-        };
-      }
-
-      // If current agent is a worker and new one is ORCHESTRATOR, keep current
-      if (currentAgent.agentType !== 'ORCHESTRATOR' && newAgentType === 'ORCHESTRATOR') {
-        return currentAgent;
-      }
-
-      // Otherwise use the new agent (both are workers or both are orchestrators)
-      return {
-        agentType: newAgentType,
+    // Add to active agents map (supports parallel execution)
+    setActiveAgents((current) => {
+      const updated = new Map(current);
+      updated.set(agentKey, {
+        agentType,
         taskDescription: event.taskDescription,
-      };
+        startedAt: Date.now(),
+      });
+      return updated;
     });
 
     setStreamingChunks([]);
     setIsStreamingDocument(false); // Reset document detection for new agent
-    setIsAgentWorking(true);
   }, []);
 
-  const handleAgentChunk = useCallback((event: { chunk?: string; agentType?: string }) => {
+  const handleAgentChunk = useCallback((event: { chunk?: string; agentType?: string; agentId?: string }) => {
     // Only accumulate chunks for conversational agents (like PM_ONBOARDING)
     // Background/document agents work silently and save to Docs tab
-    if (event.chunk && activeAgent && !isBackgroundAgent(activeAgent.agentType)) {
+    const agentType = event.agentType || '';
+
+    // Check if any active agent is conversational (not background)
+    const hasConversationalAgent = Array.from(activeAgents.values()).some(
+      agent => !isBackgroundAgent(agent.agentType)
+    );
+
+    if (event.chunk && hasConversationalAgent && !isBackgroundAgent(agentType)) {
       // Check if this chunk starts a document (intake, PRD, etc.)
       // Documents start with markdown headers like "# Project Intake:" or code fences
       const combinedContent = streamingChunks.join('') + event.chunk;
@@ -2933,19 +3292,33 @@ export default function UnifiedDashboard() {
         setStreamingChunks(prev => [...prev, event.chunk!]);
       }
     }
-  }, [activeAgent, isBackgroundAgent, streamingChunks, isStreamingDocument]);
+  }, [activeAgents, isBackgroundAgent, streamingChunks, isStreamingDocument]);
 
   const handleAgentProgress = useCallback((event: { agentId?: string; agentType?: string; message?: string }) => {
     console.log('Agent progress:', event);
-    // Update the active agent's task description with the progress message
-    if (event.message) {
-      setActiveAgent(prev => {
-        if (!prev) return prev;
-        // Only update if it's the same agent type
-        if (event.agentType && prev.agentType === event.agentType) {
-          return { ...prev, taskDescription: event.message };
+    // Update the specific agent's task description with the progress message
+    if (event.message && event.agentType) {
+      const agentType = event.agentType; // Capture for closure
+      const message = event.message;
+      setActiveAgents((current) => {
+        const updated = new Map(current);
+        // Find agent by agentId or agentType
+        const agentKey = event.agentId || agentType;
+
+        // Try to find by exact key first
+        if (updated.has(agentKey)) {
+          const agent = updated.get(agentKey)!;
+          updated.set(agentKey, { ...agent, taskDescription: message });
+        } else {
+          // Fallback: find by agentType match
+          for (const [key, agent] of updated.entries()) {
+            if (agent.agentType === agentType) {
+              updated.set(key, { ...agent, taskDescription: message });
+              break;
+            }
+          }
         }
-        return prev;
+        return updated;
       });
     }
   }, []);
@@ -2969,35 +3342,64 @@ export default function UnifiedDashboard() {
       queryClient.invalidateQueries({ queryKey: ['documents', projectId] });
     }
 
-    // Only clear working state if this is the currently active agent
-    // This prevents ORCHESTRATOR completion from hiding a worker agent's progress
-    setActiveAgent((currentAgent) => {
-      if (!currentAgent) return null;
+    // Remove the completed agent from the active agents map after a short delay
+    const agentKey = event.agentId || event.agentType;
+    if (agentKey) {
+      setTimeout(() => {
+        setActiveAgents((current) => {
+          const updated = new Map(current);
 
-      // If the completed agent matches the current active agent, clear it after delay
-      if (currentAgent.agentType === event.agentType) {
-        setIsAgentWorking(false);
-        setTimeout(() => {
-          setActiveAgent((prev) => {
-            // Only clear if still the same agent (another might have started)
-            if (prev?.agentType === event.agentType) {
-              setStreamingChunks([]);
-              setIsStreamingDocument(false);
-              return null;
+          // Try to remove by exact key
+          if (updated.has(agentKey)) {
+            updated.delete(agentKey);
+          } else if (event.agentType) {
+            // Fallback: find and remove by agentType
+            for (const [key, agent] of updated.entries()) {
+              if (agent.agentType === event.agentType) {
+                updated.delete(key);
+                break;
+              }
             }
-            return prev;
-          });
-        }, 2000);
-      }
+          }
 
-      return currentAgent;
-    });
+          // Clear streaming state if no agents left
+          if (updated.size === 0) {
+            setStreamingChunks([]);
+            setIsStreamingDocument(false);
+          }
+
+          return updated;
+        });
+      }, 2000); // Keep showing for 2 seconds after completion
+    }
   }, [currentProjectId, searchParams, queryClient]);
 
-  const handleAgentFailed = useCallback((event: { error?: string }) => {
+  const handleAgentFailed = useCallback((event: { agentId?: string; agentType?: string; error?: string }) => {
     console.error('Agent failed:', event);
-    setIsAgentWorking(false);
-    setActiveAgent(null);
+
+    // Remove the failed agent from active agents
+    const agentKey = event.agentId || event.agentType;
+    if (agentKey) {
+      setActiveAgents((current) => {
+        const updated = new Map(current);
+        if (updated.has(agentKey)) {
+          updated.delete(agentKey);
+        } else if (event.agentType) {
+          // Fallback: find and remove by agentType
+          for (const [key, agent] of updated.entries()) {
+            if (agent.agentType === event.agentType) {
+              updated.delete(key);
+              break;
+            }
+          }
+        }
+        return updated;
+      });
+    } else {
+      // If no identifier, clear all agents (legacy behavior)
+      setActiveAgents(new Map());
+    }
+
     setStreamingChunks([]);
     setIsStreamingDocument(false);
   }, []);
@@ -3027,6 +3429,17 @@ export default function UnifiedDashboard() {
       console.log('Invalidating documents and journey queries for project:', projectId);
       queryClient.invalidateQueries({ queryKey: ['documents', projectId] });
       queryClient.invalidateQueries({ queryKey: ['journey', projectId] });
+    }
+  }, [currentProjectId, queryClient, searchParams]);
+
+  // Handle workspace file changes (code generation updates)
+  const handleWorkspaceUpdated = useCallback((event: { projectId: string; files: Array<{ path: string; action: string }>; timestamp: string }) => {
+    console.log('Workspace updated event received:', event);
+    // Invalidate workspace tree query to refresh code tab in real-time
+    const projectId = currentProjectId || searchParams.get('project');
+    if (projectId && event.projectId === projectId) {
+      console.log(`Refreshing code tab: ${event.files.length} file(s) changed`);
+      queryClient.invalidateQueries({ queryKey: ['workspace-tree', projectId] });
     }
   }, [currentProjectId, queryClient, searchParams]);
 
@@ -3063,6 +3476,7 @@ export default function UnifiedDashboard() {
     onAgentFailed: handleAgentFailed,
     onGateReady: handleGateReady,
     onDocumentCreated: handleDocumentCreated,
+    onWorkspaceUpdated: handleWorkspaceUpdated,
     onChatMessage: handleChatMessage,
     onOrchestratorMessage: handleOrchestratorMessage,
   });
@@ -3118,15 +3532,18 @@ export default function UnifiedDashboard() {
 
         if (runningAgent) {
           console.log('Found running agent on load:', runningAgent.agentType);
-          setActiveAgent({
-            agentType: runningAgent.agentType,
-            taskDescription: 'Working...',
+          setActiveAgents((current) => {
+            const updated = new Map(current);
+            updated.set(runningAgent.id, {
+              agentType: runningAgent.agentType,
+              taskDescription: 'Working...',
+              startedAt: new Date(runningAgent.createdAt).getTime(),
+            });
+            return updated;
           });
-          setIsAgentWorking(true);
         } else {
           // No active running agents - clear any stale working state
-          setIsAgentWorking(false);
-          setActiveAgent(null);
+          setActiveAgents(new Map());
         }
       } catch (error) {
         console.error('Failed to check running agents:', error);
@@ -3452,61 +3869,118 @@ export default function UnifiedDashboard() {
         </div>
       ) : (
         <div className="flex-1 flex overflow-hidden relative z-10 gap-0 p-1.5">
-          {/* Left Panel - Product Orchestrator (Always visible) */}
-          <div className={`w-[340px] min-w-[320px] pr-1 ${isDark ? 'bg-slate-900/30' : ''}`}>
-            <OrchestratorChat
-              theme={theme}
-              isNewProject={isNewProject}
-              projectName={currentProjectName || undefined}
-              projectId={currentProjectId}
-              activeAgent={activeAgent}
-              streamingChunks={streamingChunks}
-              isAgentWorking={isAgentWorking}
-              agentEvents={agentEvents}
-              incomingMessages={chatMessages}
-              onApproveGate={handleGateApprove}
-              onViewDocument={() => {
-                setActiveTab('docs');
-              }}
-              onIntakeComplete={async (answers) => {
-                console.log('Intake complete:', answers);
-                setIsNewProject(false);
-
-                // Submit intake answers to backend
-                if (currentProjectId) {
-                  try {
-                    const intakeAnswers = Object.entries(answers).map(([questionId, answer]) => ({
-                      questionId,
-                      answer,
-                    }));
-                    const result = await workflowApi.submitIntake({
-                      projectId: currentProjectId,
-                      answers: intakeAnswers,
-                    });
-                    console.log('Intake submitted successfully:', result);
-                  } catch (error) {
-                    console.error('Failed to submit intake:', error);
+          {/* Code tab layout: chat integrated into content area */}
+          {activeTab === 'code' ? (
+            <div className="flex-1 min-w-0">
+              <WorkspacePanel
+                activeTab={activeTab}
+                onTabChange={(tab, documentId) => {
+                  setActiveTab(tab);
+                  if (documentId) {
+                    setAutoSelectDocumentKey(documentId);
                   }
-                }
-              }}
-            />
-          </div>
+                }}
+                theme={theme}
+                projectId={currentProjectId}
+                autoSelectDocumentKey={autoSelectDocumentKey}
+                renderChat={() => (
+                  <OrchestratorChat
+                    theme={theme}
+                    isNewProject={isNewProject}
+                    projectName={currentProjectName || undefined}
+                    projectId={currentProjectId}
+                    activeAgents={activeAgents}
+                    streamingChunks={streamingChunks}
+                    isAgentWorking={isAgentWorking}
+                    agentEvents={agentEvents}
+                    incomingMessages={chatMessages}
+                    onApproveGate={handleGateApprove}
+                    orientation="vertical"
+                    onViewDocument={() => {
+                      setActiveTab('docs');
+                    }}
+                    onIntakeComplete={async (answers) => {
+                      console.log('Intake complete:', answers);
+                      setIsNewProject(false);
 
-          {/* Center Panel - Now takes full remaining width */}
-          <div className="flex-1 min-w-[380px]">
-            <WorkspacePanel
-              activeTab={activeTab}
-              onTabChange={(tab, documentId) => {
-                setActiveTab(tab);
-                if (documentId) {
-                  setAutoSelectDocumentKey(documentId);
-                }
-              }}
-              theme={theme}
-              projectId={currentProjectId}
-              autoSelectDocumentKey={autoSelectDocumentKey}
-            />
-          </div>
+                      if (currentProjectId) {
+                        try {
+                          const intakeAnswers = Object.entries(answers).map(([questionId, answer]) => ({
+                            questionId,
+                            answer,
+                          }));
+                          const result = await workflowApi.submitIntake({
+                            projectId: currentProjectId,
+                            answers: intakeAnswers,
+                          });
+                          console.log('Intake submitted successfully:', result);
+                        } catch (error) {
+                          console.error('Failed to submit intake:', error);
+                        }
+                      }
+                    }}
+                  />
+                )}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Default layout: Left panel chat + center content */}
+              <div className={`w-[340px] min-w-[320px] pr-1 ${isDark ? 'bg-slate-900/30' : ''}`}>
+                <OrchestratorChat
+                  theme={theme}
+                  isNewProject={isNewProject}
+                  projectName={currentProjectName || undefined}
+                  projectId={currentProjectId}
+                  activeAgents={activeAgents}
+                  streamingChunks={streamingChunks}
+                  isAgentWorking={isAgentWorking}
+                  agentEvents={agentEvents}
+                  incomingMessages={chatMessages}
+                  onApproveGate={handleGateApprove}
+                  orientation="vertical"
+                  onViewDocument={() => {
+                    setActiveTab('docs');
+                  }}
+                  onIntakeComplete={async (answers) => {
+                    console.log('Intake complete:', answers);
+                    setIsNewProject(false);
+
+                    if (currentProjectId) {
+                      try {
+                        const intakeAnswers = Object.entries(answers).map(([questionId, answer]) => ({
+                          questionId,
+                          answer,
+                        }));
+                        const result = await workflowApi.submitIntake({
+                          projectId: currentProjectId,
+                          answers: intakeAnswers,
+                        });
+                        console.log('Intake submitted successfully:', result);
+                      } catch (error) {
+                        console.error('Failed to submit intake:', error);
+                      }
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="flex-1 min-w-[380px]">
+                <WorkspacePanel
+                  activeTab={activeTab}
+                  onTabChange={(tab, documentId) => {
+                    setActiveTab(tab);
+                    if (documentId) {
+                      setAutoSelectDocumentKey(documentId);
+                    }
+                  }}
+                  theme={theme}
+                  projectId={currentProjectId}
+                  autoSelectDocumentKey={autoSelectDocumentKey}
+                />
+              </div>
+            </>
+          )}
 
           {/* Floating Metrics Card */}
           <FloatingMetricsCard

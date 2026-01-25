@@ -275,11 +275,69 @@ Run all validators before proceeding.
 
 > **CRITICAL:** G3 approval will be BLOCKED if validate:specs script is missing. Enforced by `validate-project.sh g3`.
 
-### Phase 4: Documentation
+### Phase 4: Project Structure Definition (CRITICAL)
+
+**For fullstack applications, you MUST define a clear folder structure.**
+
+The standard fullstack structure is:
+```
+project/
+├── frontend/           # React/Vite application
+│   ├── package.json    # Frontend dependencies ONLY
+│   ├── vite.config.ts
+│   ├── index.html
+│   ├── tsconfig.json
+│   └── src/
+│       ├── main.tsx
+│       ├── App.tsx
+│       └── components/
+├── backend/            # NestJS/Express application
+│   ├── package.json    # Backend dependencies ONLY
+│   ├── nest-cli.json   # (if NestJS)
+│   ├── tsconfig.json
+│   ├── prisma/
+│   │   └── schema.prisma
+│   └── src/
+│       ├── main.ts
+│       └── app.module.ts
+├── specs/              # Your generated specs (shared)
+│   ├── openapi.yaml
+│   └── schemas/
+├── docs/
+│   ├── ARCHITECTURE.md
+│   └── TECH_STACK.md
+└── README.md
+```
+
+**CRITICAL RULES:**
+1. **Frontend and backend MUST be in separate folders** with separate package.json files
+2. **NEVER mix React/Vite dependencies with NestJS/Express dependencies** in the same package.json
+3. **Each folder must be independently buildable** - `cd frontend && npm install && npm run dev` must work
+4. **Document this structure in ARCHITECTURE.md** so developers know where to put their code
+
+**Include in your ARCHITECTURE.md:**
+```markdown
+## Project Structure
+
+This is a fullstack application with separate frontend and backend folders.
+
+### Frontend (`frontend/`)
+- React 19 + TypeScript + Vite
+- Run: `cd frontend && npm install && npm run dev`
+- Build: `cd frontend && npm run build`
+
+### Backend (`backend/`)
+- NestJS + TypeScript + Prisma
+- Run: `cd backend && npm install && npm run start:dev`
+- Build: `cd backend && npm run build`
+```
+
+### Phase 5: Documentation
 
 Create `docs/ARCHITECTURE.md`:
 - High-level system diagram
 - Component overview
+- **Project folder structure (see Phase 4)**
 - Data flow description
 - Security approach
 

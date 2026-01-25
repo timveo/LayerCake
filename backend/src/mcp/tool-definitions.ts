@@ -553,7 +553,14 @@ export interface ToolUseDefinition extends ToolDefinition {
   category: ToolCategory;
 }
 
-export type ToolCategory = 'context' | 'spec' | 'decision' | 'document' | 'handoff' | 'task' | 'design';
+export type ToolCategory =
+  | 'context'
+  | 'spec'
+  | 'decision'
+  | 'document'
+  | 'handoff'
+  | 'task'
+  | 'design';
 
 /**
  * Tools available during agent execution via Claude's tool_use feature

@@ -319,6 +319,30 @@ export class AppWebSocketGateway implements OnGatewayConnection, OnGatewayDiscon
     this.logger.log(`Document created: ${document.id} for project ${projectId}`);
   }
 
+  /**
+   * Emit when code files are written to the workspace
+   * This triggers the code tab to refresh and show updated files
+   */
+  emitWorkspaceUpdated(
+    projectId: string,
+    files: Array<{ path: string; action: 'created' | 'updated' | 'deleted' }>,
+  ) {
+    this.server.to(`project:${projectId}`).emit('workspace:updated', {
+      projectId,
+      files,
+      timestamp: new Date().toISOString(),
+    });
+
+    this.logger.log(`Workspace updated for project ${projectId}: ${files.length} file(s) changed`);
+  }
+
+  /**
+   * Emit when a single file is written - convenience method
+   */
+  emitFileWritten(projectId: string, filePath: string, action: 'created' | 'updated' = 'created') {
+    this.emitWorkspaceUpdated(projectId, [{ path: filePath, action }]);
+  }
+
   emitNotification(userId: string, notification: { type: string; message: string; data?: any }) {
     this.server.to(`user:${userId}`).emit('notification', {
       ...notification,

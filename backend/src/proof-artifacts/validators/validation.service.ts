@@ -34,6 +34,8 @@ export class ValidationService {
         return this.validateSpecification(filePath);
       case 'lighthouse_report':
         return this.validateLighthouseReport(filePath);
+      case 'preview_startup':
+        return this.validatePreviewStartup(filePath);
       default:
         return {
           passed: true,
@@ -409,6 +411,83 @@ export class ValidationService {
       return {
         passed: false,
         summary: 'Failed to read Lighthouse report',
+        errors: [error.message],
+      };
+    }
+  }
+
+  /**
+   * Validate preview startup - checks that the dev server started and serves content
+   * The proof file should contain JSON with server status information
+   */
+  private async validatePreviewStartup(filePath: string): Promise<ValidationResult> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const data = JSON.parse(content);
+
+      // Check for required fields indicating successful startup
+      const {
+        status,
+        url,
+        port,
+        projectType,
+        projectStructure,
+        responseStatus,
+        hasContent,
+        timestamp,
+      } = data;
+
+      const errors: string[] = [];
+
+      // Validate server is running
+      if (status !== 'running') {
+        errors.push(`Preview server status is '${status}', expected 'running'`);
+      }
+
+      // Validate we have a URL and port
+      if (!url || !port) {
+        errors.push('Preview server URL or port not configured');
+      }
+
+      // For frontend projects, validate that the server responds with content
+      if (projectStructure !== 'backend-only') {
+        if (responseStatus !== 200) {
+          errors.push(`Preview server returned HTTP ${responseStatus}, expected 200`);
+        }
+
+        if (!hasContent) {
+          errors.push('Preview server did not return any HTML content');
+        }
+      }
+
+      // Validate project type is recognized
+      if (projectType === 'unknown') {
+        errors.push('Could not detect project type (vite, nextjs, nestjs)');
+      }
+
+      const passed = errors.length === 0;
+
+      return {
+        passed,
+        summary: passed
+          ? `Preview server running at ${url} (${projectType}/${projectStructure})`
+          : `Preview validation failed: ${errors[0]}`,
+        details: {
+          status,
+          url,
+          port,
+          projectType,
+          projectStructure,
+          responseStatus,
+          hasContent,
+          timestamp,
+        },
+        errors: passed ? undefined : errors,
+      };
+    } catch (error) {
+      return {
+        passed: false,
+        summary: 'Failed to read preview startup proof',
         errors: [error.message],
       };
     }

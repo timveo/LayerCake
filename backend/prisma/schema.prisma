@@ -1116,6 +1116,7 @@ enum ProofType {
   smoke_test
   screenshot
   manual_verification
+  preview_startup // Validates that the preview server starts and serves content
 }
 
 enum PassFail {

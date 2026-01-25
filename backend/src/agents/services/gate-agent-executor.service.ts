@@ -8,6 +8,7 @@ import { AppWebSocketGateway } from '../../websocket/websocket.gateway';
 import { getAgentTaskDescription, getDeliverablesForGate } from '../../gates/gate-config';
 import { GateContext } from '../../universal-input/dto/gate-recommendation.dto';
 import { getAgentTemplate } from '../templates';
+import { FileSystemService, DirectoryStructure } from '../../code-generation/filesystem.service';
 
 /**
  * GateAgentExecutorService handles agent execution for gates,
@@ -23,6 +24,7 @@ export class GateAgentExecutorService {
     private readonly toolEnabledAiProvider: ToolEnabledAIProviderService,
     private readonly eventStore: EventStoreService,
     private readonly sessionContext: SessionContextService,
+    private readonly filesystem: FileSystemService,
     @Inject(forwardRef(() => AppWebSocketGateway))
     private readonly wsGateway: AppWebSocketGateway,
   ) {}
@@ -58,7 +60,12 @@ export class GateAgentExecutorService {
     const taskDescription = getAgentTaskDescription(agentType, gateType);
 
     // Build the agent prompt with handoff context
-    const userPrompt = this.buildAgentPrompt(taskDescription, handoffContext, project);
+    const userPrompt = await this.buildAgentPrompt(
+      projectId,
+      taskDescription,
+      handoffContext,
+      project,
+    );
 
     console.log(`[GateAgentExecutor] Starting agent ${agentType} for gate ${gateType}`);
 
@@ -322,7 +329,9 @@ export class GateAgentExecutorService {
 
             // Verify 3 designs were saved via tool calls
             const designCount = await this.prisma.designConcept.count({ where: { projectId } });
-            console.log(`[GateAgentExecutor] UX_UI_DESIGNER saved ${designCount} designs via tools`);
+            console.log(
+              `[GateAgentExecutor] UX_UI_DESIGNER saved ${designCount} designs via tools`,
+            );
 
             if (designCount < 3) {
               // Not enough designs - trigger retry
@@ -373,11 +382,16 @@ export class GateAgentExecutorService {
               },
             });
 
-            this.wsGateway.emitAgentCompleted(projectId, agentExecutionId, {
-              content: `Created ${designCount} design concepts`,
-              usage: response.usage,
-              finishReason: response.finishReason,
-            }, agentType);
+            this.wsGateway.emitAgentCompleted(
+              projectId,
+              agentExecutionId,
+              {
+                content: `Created ${designCount} design concepts`,
+                usage: response.usage,
+                finishReason: response.finishReason,
+              },
+              agentType,
+            );
 
             // Emit designs updated event
             this.wsGateway.server
@@ -442,15 +456,36 @@ export class GateAgentExecutorService {
   }
 
   /**
-   * Build agent prompt with handoff context
+   * Build agent prompt with handoff context and workspace structure
    */
-  buildAgentPrompt(
+  async buildAgentPrompt(
+    projectId: string,
     taskDescription: string,
     handoffContext: string,
     project: { name: string; type: string | null },
-  ): string {
+  ): Promise<string> {
+    // Get the current workspace structure so agent knows what exists
+    let workspaceStructure = '';
+    try {
+      const tree = await this.filesystem.getDirectoryTree(projectId);
+      workspaceStructure = this.formatDirectoryTree(tree);
+    } catch {
+      // Workspace might not exist yet
+      workspaceStructure = '(No workspace created yet)';
+    }
+
     return `## Project: ${project.name}
 Project Type: ${project.type || 'traditional'}
+
+## Current Workspace Structure
+\`\`\`
+${workspaceStructure}
+\`\`\`
+
+**IMPORTANT**: This is a fullstack project. You MUST:
+- Put ALL frontend code in the \`frontend/\` directory (e.g., \`frontend/src/components/...\`)
+- Put ALL backend code in the \`backend/\` directory (e.g., \`backend/src/modules/...\`)
+- NEVER create files in a root \`src/\` folder - always use \`frontend/src/\` or \`backend/src/\`
 
 ## Your Task
 ${taskDescription}
@@ -461,7 +496,30 @@ ${handoffContext}
 - START your response with the actual deliverable content (code, documents, etc.)
 - Do NOT include preamble like "I'll create...", "Let me...", "Based on..."
 - Do NOT use <thinking> tags or internal reasoning in output
-- Use markdown code fences with filenames for all code/documents`;
+- Use markdown code fences with filenames for all code/documents
+- ALL file paths MUST include the correct prefix (\`frontend/\` or \`backend/\`)`;
+  }
+
+  /**
+   * Format directory tree for display in prompt
+   */
+  private formatDirectoryTree(node: DirectoryStructure, indent: string = ''): string {
+    let result = `${indent}${node.name}${node.type === 'directory' ? '/' : ''}\n`;
+
+    if (node.children && node.children.length > 0) {
+      // Sort: directories first, then files
+      const sorted = [...node.children].sort((a, b) => {
+        if (a.type === 'directory' && b.type === 'file') return -1;
+        if (a.type === 'file' && b.type === 'directory') return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      for (const child of sorted) {
+        result += this.formatDirectoryTree(child, indent + '  ');
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -638,7 +696,7 @@ ${handoffContext}
       G2_PENDING: ['REQUIREMENTS'], // PM needs intake
       G3_PENDING: ['REQUIREMENTS'], // Architect needs PRD
       G4_PENDING: ['ARCHITECTURE', 'REQUIREMENTS'], // Designer needs arch + PRD
-      G5_PENDING: ['ARCHITECTURE', 'API_SPEC', 'DATABASE_SCHEMA', 'DESIGN'], // Devs need specs
+      G5_PENDING: ['REQUIREMENTS', 'ARCHITECTURE', 'API_SPEC', 'DATABASE_SCHEMA', 'DESIGN'], // Devs need PRD + specs
       G6_PENDING: ['CODE', 'API_SPEC', 'REQUIREMENTS'], // QA needs code + specs
       G7_PENDING: ['CODE', 'ARCHITECTURE'], // Security needs code + arch
       G8_PENDING: ['DEPLOYMENT_GUIDE', 'ARCHITECTURE'], // DevOps needs deploy guide

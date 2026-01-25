@@ -1127,20 +1127,65 @@ ${template.prompt.context}
               // Run full validation pipeline
               const validationResult = await this.buildExecutor.runFullValidation(projectId);
 
-              // Create proof artifact with build results
+              // Create all required proof artifacts for G5
+              const gateId = await this.getGateId(projectId, 'G5_PENDING');
+              const computeHash = (data: string): string => {
+                const crypto = require('crypto');
+                return crypto.createHash('sha256').update(data).digest('hex').slice(0, 16);
+              };
+
+              // 1. Build output proof (required for G5)
               await this.prisma.proofArtifact.create({
                 data: {
                   projectId,
-                  gateId: await this.getGateId(projectId, 'G5_PENDING'),
+                  gateId,
                   gate: 'G5_PENDING',
                   proofType: 'build_output',
-                  filePath: `builds/${agentType}-validation.json`,
-                  fileHash: 'sha256-placeholder', // Would compute actual hash
-                  contentSummary: `Build validation ${validationResult.overallSuccess ? 'passed' : 'failed'}`,
-                  passFail: validationResult.overallSuccess ? 'pass' : 'fail',
+                  filePath: `builds/${agentType}-build.json`,
+                  fileHash: computeHash(JSON.stringify(validationResult.build)),
+                  contentSummary: validationResult.build.success
+                    ? `Build passed: ${validationResult.build.output?.slice(0, 200) || 'compiled successfully'}`
+                    : `Build failed: ${validationResult.build.errors.slice(0, 3).join('; ')}`,
+                  passFail: validationResult.build.success ? 'pass' : 'fail',
                   createdBy: agentType,
                 },
               });
+
+              // 2. Lint output proof (required for G5)
+              await this.prisma.proofArtifact.create({
+                data: {
+                  projectId,
+                  gateId,
+                  gate: 'G5_PENDING',
+                  proofType: 'lint_output',
+                  filePath: `builds/${agentType}-lint.json`,
+                  fileHash: computeHash(JSON.stringify(validationResult.lint)),
+                  contentSummary: validationResult.lint.success
+                    ? `Lint passed: ${validationResult.lint.warningCount || 0} warnings, 0 errors`
+                    : `Lint failed: ${validationResult.lint.errorCount || 0} errors - ${validationResult.lint.errors.slice(0, 3).join('; ')}`,
+                  passFail: validationResult.lint.success ? 'pass' : 'fail',
+                  createdBy: agentType,
+                },
+              });
+
+              // 3. Test output proof (useful for tracking even if not strictly required at G5)
+              if (validationResult.tests) {
+                await this.prisma.proofArtifact.create({
+                  data: {
+                    projectId,
+                    gateId,
+                    gate: 'G5_PENDING',
+                    proofType: 'test_output',
+                    filePath: `builds/${agentType}-tests.json`,
+                    fileHash: computeHash(JSON.stringify(validationResult.tests)),
+                    contentSummary: validationResult.tests.success
+                      ? `Tests passed: ${validationResult.tests.testsPassed || 0} passed, ${validationResult.tests.testsFailed || 0} failed`
+                      : `Tests failed: ${validationResult.tests.errors.slice(0, 3).join('; ')}`,
+                    passFail: validationResult.tests.success ? 'pass' : 'fail',
+                    createdBy: agentType,
+                  },
+                });
+              }
 
               this.logger.log(
                 `[${agentType}] Validation ${validationResult.overallSuccess ? 'PASSED' : 'FAILED'}`,

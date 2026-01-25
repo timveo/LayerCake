@@ -25,6 +25,9 @@ services:
     environment:
       - NODE_ENV=development
       - DATABASE_URL=postgresql://fuzzyllama:fuzzyllama@host.docker.internal:5432/fuzzyllama
+      - WORKSPACE_ROOT=/app/workspaces
+    volumes:
+      - ./workspaces:/app/workspaces
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

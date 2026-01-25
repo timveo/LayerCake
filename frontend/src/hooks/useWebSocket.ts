@@ -33,6 +33,12 @@ interface AgentProgressEvent {
   timestamp: string;
 }
 
+interface WorkspaceUpdatedEvent {
+  projectId: string;
+  files: Array<{ path: string; action: 'created' | 'updated' | 'deleted' }>;
+  timestamp: string;
+}
+
 interface WebSocketEvents {
   onAgentStarted?: (event: AgentEvent) => void;
   onAgentChunk?: (event: AgentEvent) => void;
@@ -43,6 +49,7 @@ interface WebSocketEvents {
   onGateApproved?: (event: any) => void;
   onTaskCreated?: (event: any) => void;
   onDocumentCreated?: (event: any) => void;
+  onWorkspaceUpdated?: (event: WorkspaceUpdatedEvent) => void;
   onNotification?: (event: any) => void;
   onChatMessage?: (event: ChatMessageEvent) => void;
   onOrchestratorMessage?: (event: OrchestratorMessageEvent) => void;
@@ -191,6 +198,11 @@ export function useWebSocket(projectId?: string, events?: WebSocketEvents) {
     socket.on('document:created', (event) => {
       console.log('Received document:created event:', event);
       eventsRef.current?.onDocumentCreated?.(event);
+    });
+
+    socket.on('workspace:updated', (event) => {
+      console.log('Received workspace:updated event:', event);
+      eventsRef.current?.onWorkspaceUpdated?.(event);
     });
 
     socket.on('notification', (event) => {

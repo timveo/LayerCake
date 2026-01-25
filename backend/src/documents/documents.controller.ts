@@ -72,10 +72,7 @@ export class DocumentsController {
   @Get('designs/:projectId')
   @ApiOperation({ summary: 'Get all design concepts for a project' })
   @ApiResponse({ status: 200, description: 'Design concepts retrieved successfully' })
-  async getDesignConcepts(
-    @Param('projectId') projectId: string,
-    @CurrentUser() user: RequestUser,
-  ) {
+  async getDesignConcepts(@Param('projectId') projectId: string, @CurrentUser() user: RequestUser) {
     return this.documentsService.getDesignConcepts(projectId, user.id);
   }
 

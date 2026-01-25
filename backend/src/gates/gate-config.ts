@@ -18,8 +18,9 @@ export const GATE_REQUIRED_PROOFS: Record<string, ProofType[]> = {
   // G3: Architecture gate requires spec validation
   G3_PENDING: ['spec_validation'],
 
-  // G5: Development gate requires build and lint output
-  G5_PENDING: ['build_output', 'lint_output'],
+  // G5: Development gate requires build, lint, AND working preview
+  // The preview_startup proof validates that the app actually runs and serves content
+  G5_PENDING: ['build_output', 'lint_output', 'preview_startup'],
 
   // G6: Testing gate requires test output and coverage report
   G6_PENDING: ['test_output', 'coverage_report'],

@@ -178,7 +178,9 @@ export class ToolEnabledAIProviderService {
     try {
       // Get tools from centralized definitions
       const tools = getAnthropicTools(agentType);
-      this.logger.log(`[Tool-Enabled] Agent ${agentType} has ${tools.length} tools available: ${tools.map(t => t.name).join(', ')}`);
+      this.logger.log(
+        `[Tool-Enabled] Agent ${agentType} has ${tools.length} tools available: ${tools.map((t) => t.name).join(', ')}`,
+      );
 
       const messages: Anthropic.MessageParam[] = [
         {
@@ -304,7 +306,9 @@ export class ToolEnabledAIProviderService {
               if (resultObj.success) {
                 callback.onChunk(`✅ "${toolInput.name}" design saved successfully!\n`);
               } else {
-                callback.onChunk(`❌ Failed to save "${toolInput.name}": ${resultObj.error || 'Unknown error'}\n`);
+                callback.onChunk(
+                  `❌ Failed to save "${toolInput.name}": ${resultObj.error || 'Unknown error'}\n`,
+                );
               }
             } else {
               callback.onChunk(`[${toolUse.name} completed]\n`);

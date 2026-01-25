@@ -401,7 +401,10 @@ export class ProjectsService {
     });
 
     // Gate-specific status messages
-    const gateMessages: Record<string, { inReview: string; inProgress: string; userAction: string }> = {
+    const gateMessages: Record<
+      string,
+      { inReview: string; inProgress: string; userAction: string }
+    > = {
       G1_PENDING: {
         inReview: 'Project Intake is ready for review in the Docs tab.',
         inProgress: 'Gathering project requirements...',

@@ -41,14 +41,20 @@ interface IncomingChatMessage {
   timestamp: string;
 }
 
+interface ActiveAgentInfo {
+  agentType: string;
+  taskDescription?: string;
+  startedAt: number;
+}
+
 interface OrchestratorChatProps {
   theme: ThemeMode;
   isNewProject?: boolean;
   projectName?: string;
   projectId?: string | null;
   onIntakeComplete?: (answers: Record<string, string>) => void;
-  // Agent streaming props
-  activeAgent?: { agentType: string; taskDescription?: string } | null;
+  // Agent streaming props - supports multiple parallel agents
+  activeAgents?: Map<string, ActiveAgentInfo>;
   streamingChunks?: string[];
   isAgentWorking?: boolean;
   agentEvents?: AgentStreamEvent[];
@@ -59,6 +65,8 @@ interface OrchestratorChatProps {
   onApproveGate?: () => void;
   onDenyGate?: (reason: string) => void;
   onViewDocument?: (documentName: string) => void;
+  // Layout orientation - vertical (left panel) or horizontal (bottom panel like Claude Code)
+  orientation?: 'vertical' | 'horizontal';
 }
 
 // Helper to detect if message contains a Project Intake document (raw markdown)
@@ -188,6 +196,22 @@ const isBackgroundAgent = (agentType: string): boolean => {
   return BACKGROUND_AGENTS.includes(agentType);
 };
 
+// Agents that produce code (output goes to Code tab, not Docs tab)
+const CODE_PRODUCING_AGENTS = ['FRONTEND_DEVELOPER', 'BACKEND_DEVELOPER', 'DEVOPS_ENGINEER'];
+
+// Get the appropriate output location message based on active agents
+const getOutputLocationMessage = (activeAgents: Array<{ agentType: string }>): string => {
+  const hasCodeAgent = activeAgents.some(agent => CODE_PRODUCING_AGENTS.includes(agent.agentType));
+  const hasDocAgent = activeAgents.some(agent => !CODE_PRODUCING_AGENTS.includes(agent.agentType));
+
+  if (hasCodeAgent && hasDocAgent) {
+    return 'Code will appear in the Code tab and documents in the Docs tab when ready.';
+  } else if (hasCodeAgent) {
+    return 'Code will appear in the Code tab when ready for your review.';
+  }
+  return 'The document will appear in the Docs tab when ready for your review.';
+};
+
 // Get a user-friendly description for background agents
 const getBackgroundAgentMessage = (agentType: string): string => {
   const messages: Record<string, string> = {
@@ -218,7 +242,7 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
   projectName: _projectName,
   projectId,
   onIntakeComplete: _onIntakeComplete,
-  activeAgent,
+  activeAgents = new Map(),
   streamingChunks = [],
   isAgentWorking = false,
   agentEvents = [],
@@ -227,7 +251,11 @@ export const OrchestratorChat: React.FC<OrchestratorChatProps> = ({
   onApproveGate,
   onDenyGate,
   onViewDocument,
+  orientation = 'vertical',
 }) => {
+  const isHorizontal = orientation === 'horizontal';
+  // Convert activeAgents Map to array for rendering, sorted by start time
+  const activeAgentsList = Array.from(activeAgents.values()).sort((a, b) => a.startedAt - b.startedAt);
   const isDark = theme === 'dark';
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -623,24 +651,26 @@ ${status.userAction ? `**Next step:** ${status.userAction}` : ''}`,
   }, [isStreaming]);
 
   return (
-    <div className={`flex flex-col h-full rounded-xl overflow-hidden ${isDark ? 'bg-slate-800/60' : 'bg-white border border-teal-200 shadow-sm'}`}>
-      {/* Header */}
-      <div className={`flex items-center gap-2 px-3 py-1.5 border-b ${isDark ? 'border-slate-700/50' : 'border-teal-200'}`}>
-        <div className="relative">
-          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isDark ? 'bg-teal-950' : 'bg-teal-600'}`}>
-            <CpuChipIcon className="w-4 h-4 text-white" />
+    <div className={`flex flex-col ${isHorizontal ? 'max-h-[300px]' : 'h-full'} rounded-xl overflow-hidden ${isDark ? 'bg-slate-800/90 backdrop-blur-sm shadow-xl' : 'bg-white/95 backdrop-blur-sm border border-teal-200 shadow-xl'}`}>
+      {/* Header - compact in horizontal mode */}
+      {!isHorizontal && (
+        <div className={`flex items-center gap-2 px-3 py-1.5 border-b ${isDark ? 'border-slate-700/50' : 'border-teal-200'}`}>
+          <div className="relative">
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isDark ? 'bg-teal-950' : 'bg-teal-600'}`}>
+              <CpuChipIcon className="w-4 h-4 text-white" />
+            </div>
+            <motion.div
+              className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ${isDark ? 'border border-slate-800' : 'border border-teal-50'}`}
+              animate={{ scale: [1, 1.2, 1] }}
+              transition={{ duration: 4, repeat: Infinity }}
+            />
           </div>
-          <motion.div
-            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ${isDark ? 'border border-slate-800' : 'border border-teal-50'}`}
-            animate={{ scale: [1, 1.2, 1] }}
-            transition={{ duration: 4, repeat: Infinity }}
-          />
+          <span className={`font-semibold text-xs flex-1 ${isDark ? 'text-white' : 'text-teal-800'}`}>Project Orchestrator</span>
         </div>
-        <span className={`font-semibold text-xs flex-1 ${isDark ? 'text-white' : 'text-teal-800'}`}>Project Orchestrator</span>
-      </div>
+      )}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
+      {/* Messages - vertical scroll, compact in horizontal mode */}
+      <div className={`${isHorizontal ? 'max-h-[200px]' : 'flex-1'} overflow-y-auto p-3 space-y-3 min-h-0`}>
         {messages.map((rawMsg, i) => {
           const msg = transformMessageForDisplay(rawMsg);
           // Skip rendering raw intake documents - backend sends a separate summary message
@@ -668,48 +698,60 @@ ${status.userAction ? `**Next step:** ${status.userAction}` : ''}`,
           );
         })}
 
-        {/* Agent streaming output */}
-        {isAgentWorking && activeAgent && (
+        {/* Agent streaming output - supports multiple parallel agents */}
+        {isAgentWorking && activeAgentsList.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className={`rounded-2xl rounded-bl-md max-w-[90%] overflow-hidden ${isDark ? 'bg-slate-700 border border-slate-600' : 'bg-white border border-teal-200'}`}
           >
-            {/* Agent header */}
+            {/* Agent header - shows all working agents */}
             <div className={`flex items-center gap-2 px-3 py-2 border-b ${isDark ? 'border-slate-600 bg-slate-700/50' : 'border-teal-100 bg-teal-50'}`}>
               <motion.div
                 className={`w-2 h-2 rounded-full bg-emerald-400`}
                 animate={{ scale: [1, 1.3, 1] }}
                 transition={{ duration: 1, repeat: Infinity }}
               />
-              <span className={`text-[10px] font-semibold ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
-                {activeAgent.agentType.replace(/_/g, ' ')}
+              <div className="flex flex-wrap items-center gap-1">
+                {activeAgentsList.map((agent, index) => (
+                  <span key={agent.agentType + index}>
+                    <span className={`text-[10px] font-semibold ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
+                      {agent.agentType.replace(/_/g, ' ')}
+                    </span>
+                    {index < activeAgentsList.length - 1 && (
+                      <span className={`text-[10px] mx-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>&</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+              <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                {activeAgentsList.length > 1 ? 'working in parallel...' : 'working...'}
               </span>
-              <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>working...</span>
             </div>
             {/* Streaming content or background work indicator */}
             <div className={`px-3 py-2 text-xs leading-relaxed ${isDark ? 'text-white' : 'text-slate-800'}`}>
-              {isBackgroundAgent(activeAgent.agentType) ? (
-                // Background agents: show dynamic progress message from WebSocket,
-                // falling back to static message if not available
+              {activeAgentsList.every(agent => isBackgroundAgent(agent.agentType)) ? (
+                // All background agents: show progress for each
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="flex gap-1">
-                      {[0, 1, 2].map((i) => (
-                        <motion.span
-                          key={i}
-                          className={`w-1.5 h-1.5 rounded-full ${isDark ? 'bg-teal-400' : 'bg-teal-600'}`}
-                          animate={{ y: [0, -4, 0] }}
-                          transition={{ duration: 0.5, delay: i * 0.1, repeat: Infinity }}
-                        />
-                      ))}
+                  {activeAgentsList.map((agent, index) => (
+                    <div key={agent.agentType + index} className="flex items-center gap-2">
+                      <div className="flex gap-1">
+                        {[0, 1, 2].map((i) => (
+                          <motion.span
+                            key={i}
+                            className={`w-1.5 h-1.5 rounded-full ${isDark ? 'bg-teal-400' : 'bg-teal-600'}`}
+                            animate={{ y: [0, -4, 0] }}
+                            transition={{ duration: 0.5, delay: (i + index * 3) * 0.1, repeat: Infinity }}
+                          />
+                        ))}
+                      </div>
+                      <span className={`text-[10px] ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
+                        {agent.taskDescription || getBackgroundAgentMessage(agent.agentType)}
+                      </span>
                     </div>
-                    <span className={`text-[10px] ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
-                      {activeAgent.taskDescription || getBackgroundAgentMessage(activeAgent.agentType)}
-                    </span>
-                  </div>
+                  ))}
                   <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    The document will appear in the Docs tab when ready for your review.
+                    {getOutputLocationMessage(activeAgentsList)}
                   </p>
                 </div>
               ) : currentStreamingContent || streamingChunks.length > 0 ? (
@@ -723,21 +765,25 @@ ${status.userAction ? `**Next step:** ${status.userAction}` : ''}`,
                   />
                 </div>
               ) : (
-                // Fallback loading state
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1">
-                    {[0, 1, 2].map((i) => (
-                      <motion.span
-                        key={i}
-                        className={`w-1.5 h-1.5 rounded-full ${isDark ? 'bg-teal-400' : 'bg-teal-600'}`}
-                        animate={{ y: [0, -4, 0] }}
-                        transition={{ duration: 0.5, delay: i * 0.1, repeat: Infinity }}
-                      />
-                    ))}
-                  </div>
-                  <span className={`text-[10px] ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
-                    {activeAgent.taskDescription || 'Starting task...'}
-                  </span>
+                // Fallback loading state - show all agents
+                <div className="space-y-2">
+                  {activeAgentsList.map((agent, index) => (
+                    <div key={agent.agentType + index} className="flex items-center gap-2">
+                      <div className="flex gap-1">
+                        {[0, 1, 2].map((i) => (
+                          <motion.span
+                            key={i}
+                            className={`w-1.5 h-1.5 rounded-full ${isDark ? 'bg-teal-400' : 'bg-teal-600'}`}
+                            animate={{ y: [0, -4, 0] }}
+                            transition={{ duration: 0.5, delay: (i + index * 3) * 0.1, repeat: Infinity }}
+                          />
+                        ))}
+                      </div>
+                      <span className={`text-[10px] ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
+                        {agent.taskDescription || 'Starting task...'}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -865,18 +911,30 @@ ${status.userAction ? `**Next step:** ${status.userAction}` : ''}`,
 
       {/* Input - always interactive, never blocked */}
       <div className={`p-3 border-t relative z-50 ${isDark ? 'border-slate-700/50' : 'border-teal-200'}`}>
-        <div className={`flex items-center gap-2 rounded-full px-3 py-1.5 ${isDark ? 'bg-slate-700/50' : 'bg-white border border-teal-200'}`}>
+        <div className={`flex items-center gap-2 rounded-full px-3 py-2 ${isDark ? 'bg-slate-700/50' : 'bg-white border border-teal-200'}`}>
+          {isHorizontal && (
+            <div className="relative flex-shrink-0">
+              <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${isDark ? 'bg-teal-950' : 'bg-teal-600'}`}>
+                <CpuChipIcon className="w-3 h-3 text-white" />
+              </div>
+              <motion.div
+                className={`absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 ${isDark ? 'border border-slate-800' : 'border border-teal-50'}`}
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ duration: 4, repeat: Infinity }}
+              />
+            </div>
+          )}
           <input
             ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Type your response..."
+            placeholder={isHorizontal ? "Message the orchestrator..." : "Type your response..."}
             autoFocus
             className={`flex-1 bg-transparent text-xs focus:outline-none pointer-events-auto ${isDark ? 'text-white placeholder-teal-300/50' : 'text-teal-900 placeholder-teal-400'}`}
           />
-          <button onClick={handleSend} className={`w-7 h-7 rounded-full text-white flex items-center justify-center pointer-events-auto ${isDark ? 'bg-teal-950' : 'bg-teal-600'}`}>
+          <button onClick={handleSend} className={`w-7 h-7 rounded-full text-white flex items-center justify-center pointer-events-auto flex-shrink-0 ${isDark ? 'bg-teal-950' : 'bg-teal-600'}`}>
             <PaperAirplaneIcon className="w-3 h-3" />
           </button>
         </div>

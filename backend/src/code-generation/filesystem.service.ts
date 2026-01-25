@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { AppWebSocketGateway } from '../websocket/websocket.gateway';
 
 const execAsync = promisify(exec);
 
@@ -47,7 +48,10 @@ export class FileSystemService {
   private readonly logger = new Logger(FileSystemService.name);
   private readonly workspaceRoot: string;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() private readonly wsGateway?: AppWebSocketGateway,
+  ) {
     // Workspace root where all project folders are created
     this.workspaceRoot =
       this.config.get<string>('WORKSPACE_ROOT') || path.join(process.cwd(), '..', 'workspaces');
@@ -95,7 +99,7 @@ export class FileSystemService {
    */
   async initializeProjectStructure(
     projectId: string,
-    projectType: 'react-vite' | 'nestjs' | 'nextjs' | 'express',
+    projectType: 'react-vite' | 'nestjs' | 'nextjs' | 'express' | 'fullstack',
   ): Promise<void> {
     const projectPath = this.getProjectPath(projectId);
 
@@ -116,12 +120,14 @@ export class FileSystemService {
 
   /**
    * Write a file to the project workspace
+   * @param emitEvent - Whether to emit WebSocket event (default: true)
    */
   async writeFile(
     projectId: string,
     filePath: string,
     content: string,
     encoding: BufferEncoding = 'utf-8',
+    emitEvent: boolean = true,
   ): Promise<void> {
     const projectPath = this.getProjectPath(projectId);
     const fullPath = path.join(projectPath, filePath);
@@ -131,23 +137,50 @@ export class FileSystemService {
       throw new Error(`Invalid file path: ${filePath} (path traversal detected)`);
     }
 
+    // Check if file exists (for created vs updated)
+    const fileExisted = await fs.pathExists(fullPath);
+
     // Ensure parent directory exists
     await fs.ensureDir(path.dirname(fullPath));
 
     // Write file
     await fs.writeFile(fullPath, content, encoding);
     this.logger.debug(`Wrote file: ${filePath} (${content.length} bytes)`);
+
+    // Emit WebSocket event for real-time updates in the code tab
+    if (emitEvent && this.wsGateway) {
+      this.wsGateway.emitFileWritten(projectId, filePath, fileExisted ? 'updated' : 'created');
+    }
   }
 
   /**
    * Write multiple files at once
+   * Emits a single batched WebSocket event for all files
    */
   async writeFiles(projectId: string, files: FileToWrite[]): Promise<void> {
+    const fileActions: Array<{ path: string; action: 'created' | 'updated' }> = [];
+
     for (const file of files) {
-      await this.writeFile(projectId, file.path, file.content, file.encoding || 'utf-8');
+      // Check if file exists before writing
+      const projectPath = this.getProjectPath(projectId);
+      const fullPath = path.join(projectPath, file.path);
+      const fileExisted = await fs.pathExists(fullPath);
+
+      // Write without emitting individual events
+      await this.writeFile(projectId, file.path, file.content, file.encoding || 'utf-8', false);
+
+      fileActions.push({
+        path: file.path,
+        action: fileExisted ? 'updated' : 'created',
+      });
     }
 
     this.logger.log(`Wrote ${files.length} files for project ${projectId}`);
+
+    // Emit single batched WebSocket event for all files
+    if (this.wsGateway && fileActions.length > 0) {
+      this.wsGateway.emitWorkspaceUpdated(projectId, fileActions);
+    }
   }
 
   /**
@@ -329,6 +362,24 @@ export class FileSystemService {
         return [...common, 'src', 'src/app', 'src/components', 'public'];
       case 'express':
         return [...common, 'src', 'src/routes', 'src/controllers', 'src/services'];
+      case 'fullstack':
+        // Fullstack projects have separate frontend/ and backend/ directories
+        return [
+          ...common,
+          'frontend',
+          'frontend/src',
+          'frontend/src/components',
+          'frontend/src/pages',
+          'frontend/src/hooks',
+          'frontend/src/stores',
+          'frontend/public',
+          'backend',
+          'backend/src',
+          'backend/src/modules',
+          'backend/src/common',
+          'backend/prisma',
+          'backend/test',
+        ];
       default:
         return common;
     }

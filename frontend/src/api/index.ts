@@ -9,3 +9,4 @@ export * from './github';
 export * from './specifications';
 export * from './agents';
 export * from './metrics';
+export * from './workspace';

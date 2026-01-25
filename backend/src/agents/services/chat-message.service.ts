@@ -289,7 +289,9 @@ Keep your response concise and helpful. Don't be pushy about approval.`;
     userId: string,
     message: string,
   ): Promise<{ agentExecutionId: string; gateApproved: boolean }> {
-    console.log(`[ChatMessageService.handlePostG1Message] Received message: "${message.substring(0, 50)}..."`);
+    console.log(
+      `[ChatMessageService.handlePostG1Message] Received message: "${message.substring(0, 50)}..."`,
+    );
 
     // Get project and intake document for context
     const project = await this.prisma.project.findUnique({
@@ -413,7 +415,12 @@ Keep it concise - one short paragraph.`,
       (d) => d.title === 'Design System Document' || d.title === 'Design System',
     );
     // G5-G9 document detection (using actual DocumentType enum values)
-    const codeDoc = documents.find((d) => d.documentType === 'CODE');
+    // For G5, check if there are build proofs (code exists in workspace, not in documents)
+    const g5Proofs = await this.prisma.proofArtifact.findFirst({
+      where: { projectId, gate: 'G5_PENDING', proofType: 'build_output' },
+    });
+    const hasCodeInWorkspace = !!g5Proofs; // If proofs exist, code was generated
+
     const testDoc = documents.find(
       (d) => d.documentType === 'TEST_PLAN' || d.title === 'Test Plan',
     );
@@ -439,12 +446,12 @@ Keep it concise - one short paragraph.`,
     const isInReview = currentGate?.status === 'IN_REVIEW';
     const hasFeedback = this.feedbackService.isFeedbackMessage(message);
 
-    // Map gate numbers to their relevant documents
+    // Map gate numbers to their relevant documents/artifacts
     const gateDocMap: Record<number, boolean> = {
       2: !!prdDoc,
       3: !!archDoc,
       4: !!designDoc,
-      5: !!codeDoc,
+      5: hasCodeInWorkspace, // G5 uses workspace files, not documents
       6: !!testDoc,
       7: !!securityDoc,
       8: !!deployDoc,

@@ -38,6 +38,14 @@ export interface SecurityScanResult extends BuildResult {
   totalVulnerabilities: number;
 }
 
+export interface FullstackValidationResult {
+  isFullstack: boolean;
+  frontend?: BuildResult;
+  backend?: BuildResult;
+  overallSuccess: boolean;
+  errors: string[];
+}
+
 /**
  * BuildExecutorService - Execute build, test, and validation commands
  *
@@ -58,6 +66,141 @@ export class BuildExecutorService {
   private readonly logger = new Logger(BuildExecutorService.name);
 
   constructor(private readonly filesystem: FileSystemService) {}
+
+  /**
+   * Detect if this is a fullstack project with separate frontend/backend folders
+   */
+  async detectProjectStructure(
+    projectId: string,
+  ): Promise<{ isFullstack: boolean; hasFrontend: boolean; hasBackend: boolean }> {
+    const hasFrontend = await this.filesystem.fileExists(projectId, 'frontend/package.json');
+    const hasBackend = await this.filesystem.fileExists(projectId, 'backend/package.json');
+
+    return {
+      isFullstack: hasFrontend && hasBackend,
+      hasFrontend,
+      hasBackend,
+    };
+  }
+
+  /**
+   * Validate a fullstack project - BOTH frontend AND backend must build successfully
+   * This is the primary validation method for G5 (Development gate)
+   */
+  async validateFullstackProject(projectId: string): Promise<FullstackValidationResult> {
+    this.logger.log(`Validating fullstack project ${projectId}`);
+
+    const structure = await this.detectProjectStructure(projectId);
+
+    if (!structure.isFullstack) {
+      // Not a fullstack project, use standard validation
+      this.logger.log('Not a fullstack project, using standard validation');
+      return {
+        isFullstack: false,
+        overallSuccess: true,
+        errors: [],
+      };
+    }
+
+    this.logger.log('Detected fullstack project - validating both frontend and backend');
+    const errors: string[] = [];
+
+    // Validate frontend
+    const frontendResult = await this.validateSubproject(projectId, 'frontend');
+    if (!frontendResult.success) {
+      errors.push(`Frontend build failed: ${frontendResult.errors.join(', ')}`);
+    }
+
+    // Validate backend
+    const backendResult = await this.validateSubproject(projectId, 'backend');
+    if (!backendResult.success) {
+      errors.push(`Backend build failed: ${backendResult.errors.join(', ')}`);
+    }
+
+    const overallSuccess = frontendResult.success && backendResult.success;
+
+    if (!overallSuccess) {
+      this.logger.error(`Fullstack validation FAILED: ${errors.join('; ')}`);
+    } else {
+      this.logger.log('Fullstack validation PASSED - both frontend and backend build successfully');
+    }
+
+    return {
+      isFullstack: true,
+      frontend: frontendResult,
+      backend: backendResult,
+      overallSuccess,
+      errors,
+    };
+  }
+
+  /**
+   * Validate a subproject (frontend/ or backend/)
+   */
+  private async validateSubproject(projectId: string, subfolder: string): Promise<BuildResult> {
+    this.logger.log(`Validating subproject: ${subfolder}`);
+    const startTime = Date.now();
+
+    // Install dependencies
+    const installResult = await this.filesystem.executeCommand(
+      projectId,
+      `cd ${subfolder} && npm install`,
+      { timeout: 300000 },
+    );
+
+    if (!installResult.success) {
+      return {
+        success: false,
+        output: installResult.stdout,
+        errors: [`npm install failed in ${subfolder}: ${installResult.stderr}`],
+        warnings: [],
+        duration: Date.now() - startTime,
+      };
+    }
+
+    // Check if build script exists
+    try {
+      const packageJson = await this.filesystem.readFile(projectId, `${subfolder}/package.json`);
+      const pkg = JSON.parse(packageJson);
+
+      if (!pkg.scripts?.build && !pkg.scripts?.dev) {
+        return {
+          success: false,
+          output: '',
+          errors: [`No build or dev script found in ${subfolder}/package.json`],
+          warnings: [],
+          duration: Date.now() - startTime,
+        };
+      }
+
+      // Run build (prefer build over dev for validation)
+      const buildScript = pkg.scripts?.build ? 'build' : 'dev';
+      const buildResult = await this.filesystem.executeCommand(
+        projectId,
+        `cd ${subfolder} && npm run ${buildScript}`,
+        { timeout: 300000 },
+      );
+
+      const errors = this.parseBuildErrors(buildResult.stdout + buildResult.stderr);
+
+      return {
+        success: buildResult.success && errors.length === 0,
+        output: buildResult.stdout,
+        errors:
+          errors.length > 0 ? errors : buildResult.success ? [] : [`Build failed in ${subfolder}`],
+        warnings: this.parseWarnings(buildResult.stdout + buildResult.stderr),
+        duration: Date.now() - startTime,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        output: '',
+        errors: [`Failed to read ${subfolder}/package.json: ${error}`],
+        warnings: [],
+        duration: Date.now() - startTime,
+      };
+    }
+  }
 
   /**
    * Install dependencies (npm install)
@@ -373,6 +516,36 @@ export class BuildExecutorService {
     const buildErrors = output.match(/^ERROR.*$/gm);
     if (buildErrors) {
       errors.push(...buildErrors);
+    }
+
+    // Vite/Rollup import resolution errors
+    const viteErrors = output.match(/\[vite\]:.*failed to resolve import.*$/gim);
+    if (viteErrors) {
+      errors.push(...viteErrors);
+    }
+
+    // Rollup errors
+    const rollupErrors = output.match(/Rollup failed.*$/gm);
+    if (rollupErrors) {
+      errors.push(...rollupErrors);
+    }
+
+    // "error during build" messages
+    const buildFailures = output.match(/error during build:.*$/gim);
+    if (buildFailures) {
+      errors.push(...buildFailures);
+    }
+
+    // Module not found errors
+    const moduleErrors = output.match(/Module not found:.*$/gm);
+    if (moduleErrors) {
+      errors.push(...moduleErrors);
+    }
+
+    // Cannot find module errors
+    const cannotFindModule = output.match(/Cannot find module.*$/gm);
+    if (cannotFindModule) {
+      errors.push(...cannotFindModule);
     }
 
     return errors;

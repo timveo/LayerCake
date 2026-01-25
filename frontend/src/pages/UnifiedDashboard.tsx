@@ -743,12 +743,12 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
 
   // Check if the design HTML is complete enough to display
   const isDesignComplete = useMemo(() => {
-    if (!currentDesign?.html) return false;
-    const html = currentDesign.html;
+    const html = currentDesign?.html;
+    if (!html) return false;
     const hasStructure = html.includes('<div') || html.includes('<section') || html.includes('<main') || html.includes('<body');
     const hasSubstantialContent = html.length > 200;
     return hasStructure && hasSubstantialContent;
-  }, [currentDesign?.html]);
+  }, [currentDesign]);
 
   // Handle design selection change (G4 only)
   const handleDesignChange = (index: number) => {
@@ -759,22 +759,37 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
     }
   };
 
-  // Track retry attempts and timing for auto-restart on errors
-  const retryCountRef = useRef<number>(0);
-  const lastRetryTimeRef = useRef<number>(0);
+  // Track retry attempts for auto-restart on errors
   const MAX_RETRIES = 3;
   const RETRY_DELAY_MS = 5000; // 5 seconds between retries
+
+  // Derive retry state from preview status to avoid effect-based state updates
+  // The server keeps track of retry attempts, we just display appropriate messages based on status
+  const isPreviewError = previewStatus?.status === 'error';
+  const isPreviewStopped = previewStatus?.status === 'stopped' || !previewStatus?.status;
+
+  // Track last retry time with a ref (only used inside effects, not during render)
+  const lastRetryTimeRef = useRef<number>(0);
+  const retryAttemptRef = useRef<number>(0);
+  const prevProjectIdRef = useRef<string | null>(null);
 
   // Auto-start preview server when code exists and server is not running
   // Also auto-retry on errors (up to MAX_RETRIES times)
   useEffect(() => {
+    // Reset retry count when project changes
+    if (prevProjectIdRef.current !== projectId) {
+      retryAttemptRef.current = 0;
+      lastRetryTimeRef.current = 0;
+      prevProjectIdRef.current = projectId ?? null;
+    }
+
     if (!projectId || !hasWorkspaceCode || startPreviewMutation.isPending) {
       return;
     }
 
-    // Server is running - all good
+    // Server is running - all good, reset retry count
     if (previewStatus?.running) {
-      retryCountRef.current = 0; // Reset retry count on success
+      retryAttemptRef.current = 0;
       return;
     }
 
@@ -784,37 +799,28 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
     }
 
     // Server errored or stopped - check if we should retry
-    const isError = previewStatus?.status === 'error';
-    const isStopped = previewStatus?.status === 'stopped' || !previewStatus?.status;
-
-    if (isError || isStopped) {
+    if (isPreviewError || isPreviewStopped) {
       const now = Date.now();
       const timeSinceLastRetry = now - lastRetryTimeRef.current;
 
       // Check retry limits
-      if (retryCountRef.current >= MAX_RETRIES) {
+      if (retryAttemptRef.current >= MAX_RETRIES) {
         console.log('[UIPreview] Max retries reached, not auto-starting');
         return;
       }
 
       // Enforce delay between retries (except for first attempt)
-      if (retryCountRef.current > 0 && timeSinceLastRetry < RETRY_DELAY_MS) {
+      if (retryAttemptRef.current > 0 && timeSinceLastRetry < RETRY_DELAY_MS) {
         return;
       }
 
       // Start/retry the server
-      retryCountRef.current += 1;
+      retryAttemptRef.current += 1;
       lastRetryTimeRef.current = now;
-      console.log(`[UIPreview] ${isError ? 'Retrying' : 'Auto-starting'} preview server (attempt ${retryCountRef.current}/${MAX_RETRIES})`);
+      console.log(`[UIPreview] ${isPreviewError ? 'Retrying' : 'Auto-starting'} preview server (attempt ${retryAttemptRef.current}/${MAX_RETRIES})`);
       startPreviewMutation.mutate(projectId);
     }
-  }, [projectId, hasWorkspaceCode, previewStatus?.running, previewStatus?.status, startPreviewMutation.isPending]);
-
-  // Reset retry count when project changes
-  useEffect(() => {
-    retryCountRef.current = 0;
-    lastRetryTimeRef.current = 0;
-  }, [projectId]);
+  }, [projectId, hasWorkspaceCode, previewStatus?.running, previewStatus?.status, isPreviewError, isPreviewStopped, startPreviewMutation]);
 
   // Loading state
   if (!projectId || isLoading) {
@@ -840,7 +846,7 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
   if (hasWorkspaceCode) {
     const isStarting = previewStatus?.status === 'starting' || startPreviewMutation.isPending;
     const isError = previewStatus?.status === 'error';
-    const isRetrying = isError && retryCountRef.current > 0 && retryCountRef.current < MAX_RETRIES;
+    const isRetrying = isError && isStarting; // Retrying when error + starting
 
     return (
       <div className="h-full flex flex-col">
@@ -861,7 +867,7 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
                 </span>
               ) : isStarting ? (
                 <span className={`text-sm ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
-                  {isRetrying ? `Retrying (${retryCountRef.current}/${MAX_RETRIES})...` : 'Starting server...'}
+                  {isRetrying ? 'Retrying...' : 'Starting server...'}
                 </span>
               ) : isError ? (
                 <span className={`text-sm ${isDark ? 'text-red-400' : 'text-red-600'}`}>
@@ -925,9 +931,7 @@ const UIPreviewContent = ({ theme, projectId }: { theme: ThemeMode; projectId: s
                   </h3>
                   <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                     {isError
-                      ? retryCountRef.current >= MAX_RETRIES
-                        ? 'Maximum retries reached. Check the server logs for errors.'
-                        : 'Something went wrong. Retrying automatically...'
+                      ? 'Something went wrong. Will retry automatically...'
                       : isStarting
                         ? 'Installing dependencies and starting the dev server. This may take a moment.'
                         : 'The preview will start automatically.'}

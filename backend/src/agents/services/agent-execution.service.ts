@@ -1010,8 +1010,8 @@ ${template.prompt.context}
     const agentProofTypes: Record<string, string> = {
       ARCHITECT: 'spec_validation',
       UX_UI_DESIGNER: 'screenshot',
-      QA_ENGINEER: 'test_results',
-      SECURITY_ENGINEER: 'scan_report',
+      QA_ENGINEER: 'test_output',
+      SECURITY_ENGINEER: 'security_scan',
       DEVOPS_ENGINEER: 'deployment_log',
     };
 
@@ -1060,12 +1060,14 @@ ${template.prompt.context}
     }
 
     // 2. Extract and write code files
+    // QA_ENGINEER writes E2E tests, so it needs to be included
     const codeGenerationAgents = [
       'FRONTEND_DEVELOPER',
       'BACKEND_DEVELOPER',
       'ML_ENGINEER',
       'DATA_ENGINEER',
       'DEVOPS_ENGINEER',
+      'QA_ENGINEER',
     ];
 
     if (codeGenerationAgents.includes(agentType)) {
@@ -1258,6 +1260,7 @@ ${template.prompt.context}
               );
             }
           }
+
         } else {
           const unparsedCount = extractionResult.unparsedBlocks?.length || 0;
           this.logger.log(
@@ -1281,6 +1284,244 @@ ${template.prompt.context}
           'critical',
           { agentType },
         );
+      }
+    }
+
+    // G6 Testing gate: Run comprehensive test suite (QA_ENGINEER)
+    // This runs independently of code extraction - QA_ENGINEER may not produce code
+    if (agentType === 'QA_ENGINEER') {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        include: { state: true },
+      });
+
+      if (project?.state?.currentGate === 'G6_PENDING') {
+        this.logger.log(`[${agentType}] Running comprehensive test validation for G6 gate...`);
+
+        try {
+          const gateId = await this.getGateId(projectId, 'G6_PENDING');
+          const computeHash = (data: string): string => {
+            const crypto = require('crypto');
+            return crypto.createHash('sha256').update(data).digest('hex').slice(0, 16);
+          };
+
+          // 1. Re-run unit tests (verify developers' tests still pass)
+          this.logger.log(`[${agentType}] Running unit tests...`);
+          const unitTestResult = await this.buildExecutor.runTests(projectId);
+
+          await this.prisma.proofArtifact.create({
+            data: {
+              projectId,
+              gateId,
+              gate: 'G6_PENDING',
+              proofType: 'unit_test_output',
+              filePath: 'test-results/unit-tests.json',
+              fileHash: computeHash(JSON.stringify(unitTestResult)),
+              contentSummary: unitTestResult.success
+                ? `Unit tests passed: ${unitTestResult.testsPassed} passed, ${unitTestResult.testsFailed} failed`
+                : `Unit tests failed: ${unitTestResult.errors.slice(0, 3).join('; ')}`,
+              passFail: unitTestResult.success ? 'pass' : 'fail',
+              createdBy: agentType,
+            },
+          });
+
+          // 2. Run E2E tests with Playwright
+          this.logger.log(`[${agentType}] Running E2E tests...`);
+          const e2eTestResult = await this.buildExecutor.runE2ETests(projectId);
+
+          await this.prisma.proofArtifact.create({
+            data: {
+              projectId,
+              gateId,
+              gate: 'G6_PENDING',
+              proofType: 'e2e_test_output',
+              filePath: 'test-results/e2e-results.json',
+              fileHash: computeHash(JSON.stringify(e2eTestResult)),
+              contentSummary: e2eTestResult.success
+                ? `E2E tests passed: ${e2eTestResult.testsPassed} passed, ${e2eTestResult.testsFailed} failed`
+                : `E2E tests failed: ${e2eTestResult.errors.slice(0, 3).join('; ')}`,
+              passFail: e2eTestResult.success ? 'pass' : 'fail',
+              createdBy: agentType,
+            },
+          });
+
+          // 3. Run integration tests (API endpoint tests)
+          this.logger.log(`[${agentType}] Running integration tests...`);
+          const integrationTestResult = await this.buildExecutor.runIntegrationTests(projectId);
+
+          await this.prisma.proofArtifact.create({
+            data: {
+              projectId,
+              gateId,
+              gate: 'G6_PENDING',
+              proofType: 'integration_test_output',
+              filePath: 'test-results/integration-tests.json',
+              fileHash: computeHash(JSON.stringify(integrationTestResult)),
+              contentSummary: integrationTestResult.success
+                ? `Integration tests passed: ${integrationTestResult.testsPassed} passed, ${integrationTestResult.testsFailed} failed`
+                : `Integration tests failed: ${integrationTestResult.errors.slice(0, 3).join('; ')}`,
+              passFail: integrationTestResult.success ? 'pass' : 'fail',
+              createdBy: agentType,
+            },
+          });
+
+          // 4. Run performance tests (if configured)
+          this.logger.log(`[${agentType}] Running performance tests...`);
+          const perfTestResult = await this.buildExecutor.runPerformanceTests(projectId);
+
+          if (perfTestResult.testsTotal > 0) {
+            await this.prisma.proofArtifact.create({
+              data: {
+                projectId,
+                gateId,
+                gate: 'G6_PENDING',
+                proofType: 'performance_test_output',
+                filePath: 'test-results/performance-tests.json',
+                fileHash: computeHash(JSON.stringify(perfTestResult)),
+                contentSummary: perfTestResult.success
+                  ? `Performance tests passed: ${perfTestResult.testsPassed} passed`
+                  : `Performance tests failed: ${perfTestResult.errors.slice(0, 3).join('; ')}`,
+                passFail: perfTestResult.success ? 'pass' : 'fail',
+                createdBy: agentType,
+              },
+            });
+          }
+
+          // Overall G6 success determination
+          const g6Success =
+            unitTestResult.success && e2eTestResult.success && integrationTestResult.success;
+
+          this.logger.log(
+            `[${agentType}] G6 Test Validation ${g6Success ? 'PASSED' : 'FAILED'}:` +
+              ` Unit: ${unitTestResult.success ? 'PASS' : 'FAIL'}` +
+              ` | E2E: ${e2eTestResult.success ? 'PASS' : 'FAIL'}` +
+              ` | Integration: ${integrationTestResult.success ? 'PASS' : 'FAIL'}` +
+              ` | Performance: ${perfTestResult.success ? 'PASS' : 'N/A'}`,
+          );
+
+          if (!g6Success) {
+            const allErrors = [
+              ...unitTestResult.errors,
+              ...e2eTestResult.errors,
+              ...integrationTestResult.errors,
+            ];
+
+            for (const error of allErrors.slice(0, 5)) {
+              await this.prisma.errorHistory.create({
+                data: {
+                  projectId,
+                  errorType: 'test',
+                  errorMessage: error,
+                  contextJson: JSON.stringify({
+                    agentType,
+                    validationPhase: 'testing',
+                    agentExecutionId,
+                  }),
+                },
+              });
+            }
+
+            // G6 STRICT MODE: Create tasks for developers to fix failing tests
+            // This ensures gate cannot proceed until tests pass
+            this.logger.log(`[${agentType}] G6 FAILED - Creating remediation tasks for developers`);
+
+            // Check for existing pending/in_progress fix tasks to avoid duplicates
+            const existingFixTasks = await this.prisma.task.findMany({
+              where: {
+                projectId,
+                phase: 'test_fix',
+                status: { in: ['not_started', 'in_progress'] },
+              },
+            });
+            const hasBackendTask = existingFixTasks.some(t => t.owner === 'BACKEND_DEVELOPER');
+            const hasFrontendTask = existingFixTasks.some(t => t.owner === 'FRONTEND_DEVELOPER');
+
+            // Create task for BACKEND_DEVELOPER if unit tests or integration tests failed (and no existing task)
+            if ((!unitTestResult.success || !integrationTestResult.success) && !hasBackendTask) {
+              const backendErrors = [
+                ...(!unitTestResult.success ? unitTestResult.errors : []),
+                ...(!integrationTestResult.success ? integrationTestResult.errors : []),
+              ];
+
+              await this.prisma.task.create({
+                data: {
+                  projectId,
+                  name: 'Fix failing unit/integration tests',
+                  title: 'Fix failing unit/integration tests',
+                  description: `Type: test_fix\nFrom: QA_ENGINEER\n\nG6 Testing Gate FAILED. The following test failures must be resolved before proceeding:\n\n${backendErrors.slice(0, 10).map((e, i) => `${i + 1}. ${e}`).join('\n')}\n\nRequired actions:\n- If no test script exists: Add "test" script to package.json (e.g., "test": "jest" or "test": "vitest")\n- If tests are failing: Fix the failing tests or the code they're testing\n- If no tests exist: Write unit tests for your code\n\nThe QA gate CANNOT be approved until all tests pass.`,
+                  phase: 'test_fix',
+                  owner: 'BACKEND_DEVELOPER',
+                  priority: 'HIGH',
+                  status: TaskStatus.not_started,
+                },
+              });
+              this.logger.log(`[${agentType}] Created test fix task for BACKEND_DEVELOPER`);
+            } else if (hasBackendTask) {
+              this.logger.log(`[${agentType}] Backend fix task already exists, skipping creation`);
+            }
+
+            // Create task for FRONTEND_DEVELOPER if E2E tests failed (and no existing task)
+            if (!e2eTestResult.success && !hasFrontendTask) {
+              await this.prisma.task.create({
+                data: {
+                  projectId,
+                  name: 'Fix failing E2E tests',
+                  title: 'Fix failing E2E tests',
+                  description: `Type: test_fix\nFrom: QA_ENGINEER\n\nG6 Testing Gate FAILED. E2E test failures must be resolved before proceeding:\n\n${e2eTestResult.errors.slice(0, 10).map((e, i) => `${i + 1}. ${e}`).join('\n')}\n\nRequired actions:\n- Fix the E2E test failures (check Playwright test output)\n- Ensure all user flows work correctly in the browser\n- Verify test selectors match actual DOM elements\n\nThe QA gate CANNOT be approved until all E2E tests pass.`,
+                  phase: 'test_fix',
+                  owner: 'FRONTEND_DEVELOPER',
+                  priority: 'HIGH',
+                  status: TaskStatus.not_started,
+                },
+              });
+              this.logger.log(`[${agentType}] Created E2E test fix task for FRONTEND_DEVELOPER`);
+            } else if (hasFrontendTask) {
+              this.logger.log(`[${agentType}] Frontend E2E fix task already exists, skipping creation`);
+            }
+
+            // Update project state to indicate G6 is blocked
+            await this.prisma.projectState.update({
+              where: { projectId },
+              data: {
+                statusMessage: `G6 Testing Gate BLOCKED: ${!unitTestResult.success ? 'Unit tests failed. ' : ''}${!e2eTestResult.success ? 'E2E tests failed. ' : ''}${!integrationTestResult.success ? 'Integration tests failed. ' : ''}Tasks created for developers to fix issues.`,
+                userAction: 'wait_for_fixes',
+              },
+            });
+
+            // Emit G6 failure event for frontend notification
+            this.wsGateway.emitTestFailure(projectId, {
+              unitTests: { success: unitTestResult.success, errors: unitTestResult.errors },
+              e2eTests: { success: e2eTestResult.success, errors: e2eTestResult.errors },
+              integrationTests: { success: integrationTestResult.success, errors: integrationTestResult.errors },
+              needsBackendFix: !unitTestResult.success || !integrationTestResult.success,
+              needsFrontendFix: !e2eTestResult.success,
+            });
+
+            // NOTE: Fix agents are triggered by GateOrchestrationService.checkGateCompletion()
+            // after QA_ENGINEER completes. We don't trigger them here to avoid duplicates.
+            this.logger.log(`[${agentType}] G6 FAILED - Tasks created for developers. Fix loop will be triggered by GateOrchestration.`);
+
+            addError(
+              'G6 Test Validation',
+              `Test validation FAILED - gate blocked until tests pass. Tasks created for developers.`,
+              'critical',
+              {
+                unitTests: unitTestResult.success,
+                e2eTests: e2eTestResult.success,
+                integrationTests: integrationTestResult.success,
+                tasksCreated: true,
+                blockedUntilFixed: true,
+              },
+            );
+          }
+        } catch (error) {
+          addError(
+            'G6 Test Validation',
+            error.message || 'Failed to run test validation',
+            'warning',
+            { gate: 'G6_PENDING' },
+          );
+        }
       }
     }
 

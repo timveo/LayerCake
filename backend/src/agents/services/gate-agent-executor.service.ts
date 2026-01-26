@@ -20,6 +20,7 @@ import { FileSystemService, DirectoryStructure } from '../../code-generation/fil
 export class GateAgentExecutorService {
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => AgentExecutionService))
     private readonly agentExecution: AgentExecutionService,
     private readonly toolEnabledAiProvider: ToolEnabledAIProviderService,
     private readonly eventStore: EventStoreService,
@@ -142,107 +143,128 @@ export class GateAgentExecutorService {
     }
 
     // Standard agent execution (non-tool-use agents)
-    const agentExecutionId = await this.agentExecution.executeAgentStream(
-      {
-        projectId,
-        agentType,
-        userPrompt,
-        model: undefined, // Use template default
-      },
-      userId,
-      {
-        onChunk: (chunk: string) => {
-          // Emit "working" progress on first chunk received
-          if (!hasEmittedWorkingProgress) {
-            hasEmittedWorkingProgress = true;
-            this.wsGateway.emitAgentProgress(
-              projectId,
-              agentExecutionId,
-              agentType,
-              getProgressMessage('working'),
-            );
-          }
-          this.wsGateway.emitAgentChunk(projectId, agentExecutionId, chunk);
-        },
-        onComplete: async (response) => {
-          // Emit finalizing progress
-          this.wsGateway.emitAgentProgress(
+    // IMPORTANT: Wrap in a Promise to wait for actual completion
+    // executeAgentStream returns immediately (fire-and-forget), but we need to wait
+    // for onComplete to be called before returning to executeGateAgents
+    await new Promise<void>((resolve, reject) => {
+      let agentExecutionId: string;
+
+      this.agentExecution
+        .executeAgentStream(
+          {
             projectId,
-            agentExecutionId,
             agentType,
-            getProgressMessage('finalizing'),
-          );
-
-          this.wsGateway.emitAgentCompleted(projectId, agentExecutionId, {
-            content: response.content,
-            usage: response.usage,
-            finishReason: response.finishReason,
-          });
-
-          // Mark this agent's deliverables complete
-          if (callbacks?.markDeliverablesComplete) {
-            await callbacks.markDeliverablesComplete(projectId, agentType);
-          } else {
-            await this.markAgentDeliverablesComplete(projectId, agentType);
-          }
-
-          // Log completion event
-          await this.eventStore.appendEvent(projectId, {
-            type: 'AgentCompleted',
-            data: {
-              agentId: agentExecutionId,
-              agentType,
-              gateType,
-              tokenUsage: response.usage,
+            userPrompt,
+            model: undefined, // Use template default
+          },
+          userId,
+          {
+            onChunk: (chunk: string) => {
+              // Emit "working" progress on first chunk received
+              if (!hasEmittedWorkingProgress) {
+                hasEmittedWorkingProgress = true;
+                this.wsGateway.emitAgentProgress(
+                  projectId,
+                  agentExecutionId,
+                  agentType,
+                  getProgressMessage('working'),
+                );
+              }
+              this.wsGateway.emitAgentChunk(projectId, agentExecutionId, chunk);
             },
-            userId,
-          });
+            onComplete: async (response) => {
+              try {
+                // Emit finalizing progress
+                this.wsGateway.emitAgentProgress(
+                  projectId,
+                  agentExecutionId,
+                  agentType,
+                  getProgressMessage('finalizing'),
+                );
 
-          console.log(`[GateAgentExecutor] Agent ${agentType} completed for gate ${gateType}`);
-        },
-        onError: async (error) => {
-          console.error(`[GateAgentExecutor] Agent ${agentType} error:`, error);
-          this.wsGateway.emitAgentFailed(projectId, agentExecutionId, error.message);
+                this.wsGateway.emitAgentCompleted(projectId, agentExecutionId, {
+                  content: response.content,
+                  usage: response.usage,
+                  finishReason: response.finishReason,
+                });
 
-          // Log failure event
-          await this.eventStore.appendEvent(projectId, {
-            type: 'AgentFailed',
-            data: {
-              agentId: agentExecutionId,
-              agentType,
-              gateType,
-              error: error.message,
-            },
-            userId,
-          });
-
-          // Auto-retry on transient errors (up to 2 retries)
-          const isTransientError =
-            error.message.includes('model:') ||
-            error.message.includes('rate_limit') ||
-            error.message.includes('timeout') ||
-            error.message.includes('503') ||
-            error.message.includes('502');
-
-          if (isTransientError && callbacks?.getRetryCount && callbacks?.onRetry) {
-            const retryCount = await callbacks.getRetryCount(projectId, agentType, gateType);
-            if (retryCount < 2) {
-              console.log(
-                `[GateAgentExecutor] Auto-retrying ${agentType} (attempt ${retryCount + 1}/2) after transient error`,
-              );
-              // Wait a bit before retrying
-              setTimeout(async () => {
-                try {
-                  await callbacks.onRetry!(projectId, agentType, gateType, userId, handoffContext);
-                } catch (retryError) {
-                  console.error(`[GateAgentExecutor] Retry failed for ${agentType}:`, retryError);
+                // Mark this agent's deliverables complete
+                if (callbacks?.markDeliverablesComplete) {
+                  await callbacks.markDeliverablesComplete(projectId, agentType);
+                } else {
+                  await this.markAgentDeliverablesComplete(projectId, agentType);
                 }
-              }, 3000);
-            }
-          }
-        },
-      },
-    );
+
+                // Log completion event
+                await this.eventStore.appendEvent(projectId, {
+                  type: 'AgentCompleted',
+                  data: {
+                    agentId: agentExecutionId,
+                    agentType,
+                    gateType,
+                    tokenUsage: response.usage,
+                  },
+                  userId,
+                });
+
+                console.log(`[GateAgentExecutor] Agent ${agentType} completed for gate ${gateType}`);
+                resolve(); // Resolve the Promise when agent completes
+              } catch (err) {
+                reject(err);
+              }
+            },
+            onError: async (error) => {
+              console.error(`[GateAgentExecutor] Agent ${agentType} error:`, error);
+              this.wsGateway.emitAgentFailed(projectId, agentExecutionId, error.message);
+
+              // Log failure event
+              await this.eventStore.appendEvent(projectId, {
+                type: 'AgentFailed',
+                data: {
+                  agentId: agentExecutionId,
+                  agentType,
+                  gateType,
+                  error: error.message,
+                },
+                userId,
+              });
+
+              // Auto-retry on transient errors (up to 2 retries)
+              const isTransientError =
+                error.message.includes('model:') ||
+                error.message.includes('rate_limit') ||
+                error.message.includes('timeout') ||
+                error.message.includes('503') ||
+                error.message.includes('502');
+
+              if (isTransientError && callbacks?.getRetryCount && callbacks?.onRetry) {
+                const retryCount = await callbacks.getRetryCount(projectId, agentType, gateType);
+                if (retryCount < 2) {
+                  console.log(
+                    `[GateAgentExecutor] Auto-retrying ${agentType} (attempt ${retryCount + 1}/2) after transient error`,
+                  );
+                  // Wait a bit before retrying
+                  setTimeout(async () => {
+                    try {
+                      await callbacks.onRetry!(projectId, agentType, gateType, userId, handoffContext);
+                      resolve(); // Resolve after successful retry
+                    } catch (retryError) {
+                      console.error(`[GateAgentExecutor] Retry failed for ${agentType}:`, retryError);
+                      reject(retryError);
+                    }
+                  }, 3000);
+                  return; // Don't reject yet - waiting for retry
+                }
+              }
+              reject(error); // Reject the Promise on error (if not retrying)
+            },
+          },
+        )
+        .then((id) => {
+          agentExecutionId = id;
+        })
+        .catch(reject);
+    });
   }
 
   /**

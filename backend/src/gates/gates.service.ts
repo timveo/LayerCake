@@ -10,8 +10,14 @@ import { GateStateMachineService } from './services/gate-state-machine.service';
 import { CreateGateDto } from './dto/create-gate.dto';
 import { UpdateGateDto } from './dto/update-gate.dto';
 import { ApproveGateDto } from './dto/approve-gate.dto';
-import { GATE_REQUIRED_PROOFS, COVERAGE_THRESHOLD_PERCENT } from './gate-config';
+import {
+  GATE_REQUIRED_PROOFS,
+  COVERAGE_THRESHOLD_PERCENT,
+  getGateConfig,
+  GateDeliverable,
+} from './gate-config';
 import { ProofArtifact, ProofType } from '@prisma/client';
+import { FileSystemService } from '../code-generation/filesystem.service';
 
 @Injectable()
 export class GatesService {
@@ -20,6 +26,7 @@ export class GatesService {
   constructor(
     private prisma: PrismaService,
     private stateMachine: GateStateMachineService,
+    private filesystem: FileSystemService,
   ) {}
 
   async create(createGateDto: CreateGateDto, userId: string) {
@@ -224,6 +231,69 @@ export class GatesService {
   }
 
   /**
+   * Validate that expected deliverable files/directories exist in the workspace.
+   * This is a failsafe to ensure agents actually created the required artifacts.
+   */
+  async validateDeliverables(
+    projectId: string,
+    gateType: string,
+    projectType: string | null,
+  ): Promise<{ valid: boolean; missing: string[]; warnings: string[] }> {
+    const config = getGateConfig(projectType, gateType);
+    if (!config || config.deliverables.length === 0) {
+      return { valid: true, missing: [], warnings: [] };
+    }
+
+    const missing: string[] = [];
+    const warnings: string[] = [];
+
+    for (const deliverable of config.deliverables) {
+      if (!deliverable.path) continue;
+
+      // Check if the deliverable path exists
+      const exists = await this.filesystem.fileExists(projectId, deliverable.path);
+
+      if (!exists) {
+        // Check if it's a directory pattern (ends with /)
+        if (deliverable.path.endsWith('/')) {
+          // For directories, check if any files exist within
+          try {
+            const structure = await this.filesystem.getDirectoryTree(
+              projectId,
+              deliverable.path.slice(0, -1),
+            );
+            if (!structure || structure.children?.length === 0) {
+              missing.push(`${deliverable.name} (${deliverable.path})`);
+            }
+          } catch {
+            missing.push(`${deliverable.name} (${deliverable.path})`);
+          }
+        } else {
+          missing.push(`${deliverable.name} (${deliverable.path})`);
+        }
+      }
+    }
+
+    // Log warnings for missing deliverables
+    if (missing.length > 0) {
+      this.logger.warn({
+        message: 'Gate has missing deliverables',
+        gateType,
+        projectId,
+        missing,
+      });
+      warnings.push(`Missing deliverables: ${missing.join(', ')}`);
+    }
+
+    // Enforce strict deliverable checking - missing deliverables block gate approval
+    return {
+      valid: missing.length === 0,
+      missing,
+      warnings,
+    };
+  }
+
+  /**
    * Approve or reject a gate.
    * Delegates to GateStateMachineService to avoid duplicate updates.
    */
@@ -255,6 +325,32 @@ export class GatesService {
 
     // Check if proof artifacts are required and validate completeness
     if (gate.requiresProof) {
+      // G6 STRICT MODE: Check for any failed test proofs first - block approval with clear message
+      if (gate.gateType === 'G6_PENDING') {
+        const failedProofs = gate.proofArtifacts.filter((a) => a.passFail === 'fail');
+        if (failedProofs.length > 0) {
+          const failedTypes = failedProofs.map((p) => p.proofType).join(', ');
+          const failedDetails = failedProofs
+            .map((p) => `${p.proofType}: ${p.contentSummary || 'Failed'}`)
+            .join('; ');
+
+          this.logger.error({
+            message: 'G6 Gate approval BLOCKED - tests are failing',
+            gateId: id,
+            gateType: gate.gateType,
+            projectId: gate.projectId,
+            userId,
+            failedProofTypes: failedTypes,
+            failedDetails,
+          });
+
+          throw new BadRequestException(
+            `Cannot approve G6 Testing Gate: Tests are failing. Failed proof types: ${failedTypes}. ` +
+              `Fix all test failures before approval. Check tasks created for developers.`,
+          );
+        }
+      }
+
       const { valid, missing } = this.validateProofArtifacts(gate.gateType, gate.proofArtifacts);
 
       if (!valid) {
@@ -300,6 +396,39 @@ export class GatesService {
           );
         }
       }
+    }
+
+    // Validate deliverables exist in the workspace (failsafe check)
+    const deliverableValidation = await this.validateDeliverables(
+      gate.projectId,
+      gate.gateType,
+      gate.project.type,
+    );
+
+    // Block approval if required deliverables are missing
+    if (!deliverableValidation.valid && approveGateDto.approved) {
+      this.logger.error({
+        message: 'Gate approval blocked - missing required deliverables',
+        gateId: id,
+        gateType: gate.gateType,
+        projectId: gate.projectId,
+        missing: deliverableValidation.missing,
+      });
+
+      throw new BadRequestException(
+        `Cannot approve gate: missing required deliverables - ${deliverableValidation.missing.join(', ')}`,
+      );
+    }
+
+    // Log warnings about non-critical deliverables
+    if (deliverableValidation.warnings.length > 0) {
+      this.logger.warn({
+        message: 'Gate approval proceeding with warnings',
+        gateId: id,
+        gateType: gate.gateType,
+        projectId: gate.projectId,
+        warnings: deliverableValidation.warnings,
+      });
     }
 
     // Delegate entirely to state machine to avoid duplicate gate updates

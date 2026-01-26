@@ -1,5 +1,19 @@
-import { Controller, Post, Get, Body, Param, UseGuards, Delete, Request } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Param,
+  UseGuards,
+  Delete,
+  Request,
+  Res,
+  Req,
+  All,
+} from '@nestjs/common';
+import { Response, Request as ExpressRequest } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Public } from '../auth/decorators/public.decorator';
 import { FileSystemService } from './filesystem.service';
 import { CodeParserService } from './code-parser.service';
 import { BuildExecutorService } from './build-executor.service';
@@ -229,11 +243,16 @@ export class CodeGenerationController {
         projectId,
       };
     }
+
+    // Use direct URL to the preview server port (exposed via docker-compose)
+    // This allows Vite's HMR and asset loading to work correctly
+    const directUrl = `http://localhost:${server.port}`;
+
     return {
       running: server.status === 'running',
       projectId: server.projectId,
       port: server.port,
-      url: server.url,
+      url: directUrl, // Direct URL to exposed preview port
       status: server.status,
       startedAt: server.startedAt,
       logs: server.logs.slice(-20), // Last 20 log lines
@@ -247,5 +266,83 @@ export class CodeGenerationController {
   @Get('preview/all')
   async getAllPreviewServers() {
     return this.previewServer.getAllServers();
+  }
+
+  /**
+   * ALL /api/code-generation/:projectId/preview/proxy
+   * ALL /api/code-generation/:projectId/preview/proxy/*
+   * Proxy requests to the preview server running inside the container
+   * Public endpoint - no auth required since iframe can't pass JWT
+   */
+  @Public()
+  @All(':projectId/preview/proxy')
+  async proxyPreviewRoot(
+    @Param('projectId') projectId: string,
+    @Req() req: ExpressRequest,
+    @Res() res: Response,
+  ) {
+    return this.handleProxyRequest(projectId, req, res);
+  }
+
+  @Public()
+  @All(':projectId/preview/proxy/*')
+  async proxyPreviewPath(
+    @Param('projectId') projectId: string,
+    @Req() req: ExpressRequest,
+    @Res() res: Response,
+  ) {
+    return this.handleProxyRequest(projectId, req, res);
+  }
+
+  private async handleProxyRequest(
+    projectId: string,
+    req: ExpressRequest,
+    res: Response,
+  ) {
+    console.log(`[Proxy] Request: ${req.method} ${req.url} for project ${projectId}`);
+
+    const server = this.previewServer.getServerStatus(projectId);
+    console.log(`[Proxy] Server status:`, server ? { status: server.status, port: server.port } : 'null');
+
+    if (!server || server.status !== 'running') {
+      res.status(503).json({ error: 'Preview server not running', projectId });
+      return;
+    }
+
+    // Extract the path after /proxy - req.url contains full URL path
+    const fullPath = req.url;
+    // Match /api/code-generation/{projectId}/preview/proxy and capture everything after
+    const proxyPath = fullPath.replace(/^.*\/preview\/proxy\/?/, '/') || '/';
+    console.log(`[Proxy] Full path: ${fullPath}, proxy path: ${proxyPath}`);
+
+    try {
+      const targetUrl = `http://localhost:${server.port}${proxyPath}`;
+      console.log(`[Proxy] Forwarding to: ${targetUrl}`);
+      const response = await fetch(targetUrl, {
+        method: req.method,
+        headers: {
+          ...Object.fromEntries(
+            Object.entries(req.headers).filter(
+              ([key]) => !['host', 'connection'].includes(key.toLowerCase()),
+            ),
+          ),
+        } as HeadersInit,
+        body: ['GET', 'HEAD'].includes(req.method) ? undefined : req.body,
+      });
+
+      // Forward status and headers
+      res.status(response.status);
+      response.headers.forEach((value, key) => {
+        if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+          res.setHeader(key, value);
+        }
+      });
+
+      // Forward body
+      const body = await response.arrayBuffer();
+      res.send(Buffer.from(body));
+    } catch (error: any) {
+      res.status(502).json({ error: `Proxy error: ${error.message}` });
+    }
   }
 }

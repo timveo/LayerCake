@@ -31,6 +31,8 @@ export class ToolEnabledAIProviderService {
     write_file: 30000, // 30 seconds
     read_file: 15000, // 15 seconds
     run_validation: 120000, // 2 minutes - build validation takes longer
+    validate_build: 300000, // 5 minutes - full build validation can take time
+    run_tests: 300000, // 5 minutes - E2E tests can take time
     execute_build: 180000, // 3 minutes - builds can be slow
     execute_tests: 180000, // 3 minutes - test suites can take time
     create_project: 60000, // 1 minute

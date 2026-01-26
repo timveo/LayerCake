@@ -560,7 +560,8 @@ export type ToolCategory =
   | 'document'
   | 'handoff'
   | 'task'
-  | 'design';
+  | 'design'
+  | 'file';
 
 /**
  * Tools available during agent execution via Claude's tool_use feature
@@ -844,6 +845,116 @@ export const TOOL_USE_DEFINITIONS: ToolUseDefinition[] = [
       required: ['name', 'style', 'html'],
     },
     allowedAgents: ['UX_UI_DESIGNER'],
+    enabledForToolUse: true,
+  },
+
+  // === File System Tools ===
+  {
+    name: 'read_file',
+    description:
+      'Read a file from the project workspace. Use this to examine existing code before making changes.',
+    category: 'file' as ToolCategory,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: {
+          type: 'string',
+          description: 'The project ID',
+        },
+        filePath: {
+          type: 'string',
+          description: 'Path to the file relative to workspace root (e.g., "frontend/src/App.tsx")',
+        },
+      },
+      required: ['projectId', 'filePath'],
+    },
+    allowedAgents: ['FRONTEND_DEVELOPER', 'BACKEND_DEVELOPER', 'QA_ENGINEER', 'DEVOPS_ENGINEER', 'ARCHITECT'],
+    enabledForToolUse: true,
+  },
+  {
+    name: 'write_file',
+    description:
+      'Write or update a file in the project workspace. Use this to create new files or modify existing code.',
+    category: 'file' as ToolCategory,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: {
+          type: 'string',
+          description: 'The project ID',
+        },
+        filePath: {
+          type: 'string',
+          description: 'Path to the file relative to workspace root (e.g., "frontend/src/App.tsx")',
+        },
+        content: {
+          type: 'string',
+          description: 'The full content to write to the file',
+        },
+      },
+      required: ['projectId', 'filePath', 'content'],
+    },
+    allowedAgents: ['FRONTEND_DEVELOPER', 'BACKEND_DEVELOPER', 'QA_ENGINEER', 'DEVOPS_ENGINEER'],
+    enabledForToolUse: true,
+  },
+  {
+    name: 'list_files',
+    description:
+      'List files in a directory of the project workspace. Use this to explore the project structure.',
+    category: 'file' as ToolCategory,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: {
+          type: 'string',
+          description: 'The project ID',
+        },
+        directory: {
+          type: 'string',
+          description: 'Directory path relative to workspace root (e.g., "frontend/src"). Defaults to root if not specified.',
+        },
+      },
+      required: ['projectId'],
+    },
+    allowedAgents: ['FRONTEND_DEVELOPER', 'BACKEND_DEVELOPER', 'QA_ENGINEER', 'DEVOPS_ENGINEER', 'ARCHITECT'],
+    enabledForToolUse: true,
+  },
+
+  // === Testing & Build Tools ===
+  {
+    name: 'run_tests',
+    description:
+      'Execute tests in the project workspace. This runs E2E tests with Playwright and returns actual test results. IMPORTANT: You MUST call this tool to validate the application - do not make up test results.',
+    category: 'task' as ToolCategory,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: {
+          type: 'string',
+          description: 'The project ID',
+        },
+      },
+      required: ['projectId'],
+    },
+    allowedAgents: ['QA_ENGINEER', 'FRONTEND_DEVELOPER', 'BACKEND_DEVELOPER'],
+    enabledForToolUse: true,
+  },
+  {
+    name: 'validate_build',
+    description:
+      'Run full build validation on the project. This compiles TypeScript, runs linting, and checks for build errors. IMPORTANT: You MUST call this tool to validate the build - do not assume the build passes.',
+    category: 'task' as ToolCategory,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: {
+          type: 'string',
+          description: 'The project ID',
+        },
+      },
+      required: ['projectId'],
+    },
+    allowedAgents: ['QA_ENGINEER', 'FRONTEND_DEVELOPER', 'BACKEND_DEVELOPER', 'DEVOPS_ENGINEER'],
     enabledForToolUse: true,
   },
 ];

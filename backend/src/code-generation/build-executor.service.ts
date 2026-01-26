@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { FileSystemService } from './filesystem.service';
+import { PreviewServerService } from './preview-server.service';
 
 export interface BuildResult {
   success: boolean;
@@ -65,7 +66,10 @@ export interface FullstackValidationResult {
 export class BuildExecutorService {
   private readonly logger = new Logger(BuildExecutorService.name);
 
-  constructor(private readonly filesystem: FileSystemService) {}
+  constructor(
+    private readonly filesystem: FileSystemService,
+    private readonly previewServer: PreviewServerService,
+  ) {}
 
   /**
    * Detect if this is a fullstack project with separate frontend/backend folders
@@ -290,20 +294,26 @@ export class BuildExecutorService {
   }
 
   /**
-   * Run tests with coverage
+   * Run tests with coverage (G6 Testing gate - unit tests)
+   * Requires actual test execution - fails if no test script or no tests found.
    */
   async runTests(projectId: string): Promise<TestResult> {
-    this.logger.log(`Running tests for project ${projectId}`);
+    this.logger.log(`Running unit tests for project ${projectId}`);
     const startTime = Date.now();
 
     // Check if package.json has test script
     const hasTestScript = await this.hasTestScript(projectId);
 
     if (!hasTestScript) {
+      // For G6 validation, no test script means tests cannot run - this is a failure
+      this.logger.warn(`No test script found for project ${projectId}`);
       return {
-        success: true,
-        output: 'No test script found, skipping tests',
-        errors: [],
+        success: false,
+        output: 'No test script found in package.json',
+        errors: [
+          'No test script configured - unit tests cannot run',
+          'Add a "test" script to package.json (e.g., "test": "jest" or "test": "vitest")',
+        ],
         warnings: [],
         duration: 0,
         testsPassed: 0,
@@ -312,6 +322,8 @@ export class BuildExecutorService {
       };
     }
 
+    // Execute actual tests
+    this.logger.log(`Executing npm test for project ${projectId}...`);
     const result = await this.filesystem.executeCommand(
       projectId,
       'npm test -- --coverage --json --outputFile=test-results.json',
@@ -324,10 +336,30 @@ export class BuildExecutorService {
     const testStats = await this.parseTestResults(projectId, result.stdout);
     const coverage = await this.parseCoverageReport(projectId);
 
+    // If command succeeded but no tests were found/run, that's also a failure
+    if (result.success && testStats.total === 0) {
+      this.logger.warn(`No unit tests found for project ${projectId}`);
+      return {
+        success: false,
+        output: result.stdout || 'No tests executed',
+        errors: ['No unit tests found - add test files to your project'],
+        warnings: [],
+        duration,
+        testsPassed: 0,
+        testsFailed: 0,
+        testsTotal: 0,
+        coverage,
+      };
+    }
+
+    this.logger.log(
+      `Unit test execution complete: ${testStats.passed} passed, ${testStats.failed} failed, ${testStats.total} total`,
+    );
+
     return {
       success: result.success && testStats.failed === 0,
       output: result.stdout,
-      errors: testStats.failed > 0 ? [`${testStats.failed} tests failed`] : [],
+      errors: testStats.failed > 0 ? [`${testStats.failed} unit tests failed`] : [],
       warnings: [],
       duration,
       testsPassed: testStats.passed,
@@ -335,6 +367,394 @@ export class BuildExecutorService {
       testsTotal: testStats.total,
       coverage,
     };
+  }
+
+  /**
+   * Run E2E tests with Playwright (G6 Testing gate)
+   * Requires a running preview server - executes actual tests against the preview.
+   */
+  async runE2ETests(projectId: string): Promise<TestResult> {
+    this.logger.log(`Running E2E tests for project ${projectId}`);
+    const startTime = Date.now();
+
+    // Step 1: Check if preview server is running (try in-memory first, then health check)
+    let previewUrl: string | null = null;
+    const previewStatus = this.previewServer.getServerStatus(projectId);
+
+    if (previewStatus && previewStatus.status === 'running') {
+      previewUrl = previewStatus.url;
+      this.logger.log(`Preview server found in memory at ${previewUrl}`);
+    } else {
+      // Preview not in memory - try to check if it's running on expected ports
+      // This handles cases where backend restarted but preview is still running
+      const basePort = 3100;
+      for (let portOffset = 0; portOffset < 10; portOffset++) {
+        const testUrl = `http://localhost:${basePort + portOffset}`;
+        try {
+          const http = await import('http');
+          const isRunning = await new Promise<boolean>((resolve) => {
+            const req = http.request(testUrl, { method: 'HEAD', timeout: 2000 }, (res) => {
+              resolve(res.statusCode !== undefined && res.statusCode < 500);
+            });
+            req.on('error', () => resolve(false));
+            req.on('timeout', () => { req.destroy(); resolve(false); });
+            req.end();
+          });
+          if (isRunning) {
+            previewUrl = testUrl;
+            this.logger.log(`Found running preview server at ${previewUrl} (not in memory)`);
+            break;
+          }
+        } catch {
+          // Continue checking next port
+        }
+      }
+    }
+
+    if (!previewUrl) {
+      return {
+        success: false,
+        output: 'Preview server not running',
+        errors: [
+          'E2E tests require a running preview server. Ensure the preview is started and healthy before running tests.',
+          'The preview server must be running at G5 completion before G6 testing can proceed.',
+        ],
+        warnings: [],
+        duration: 0,
+        testsPassed: 0,
+        testsFailed: 0,
+        testsTotal: 0,
+      };
+    }
+
+    this.logger.log(`Preview server running at ${previewUrl}`);
+
+    // Step 2: Check if playwright.config.ts exists
+    const hasPlaywrightConfig = await this.filesystem.fileExists(
+      projectId,
+      'playwright.config.ts',
+    );
+
+    if (!hasPlaywrightConfig) {
+      return {
+        success: false,
+        output: 'No playwright.config.ts found',
+        errors: ['No playwright.config.ts found - E2E tests cannot run'],
+        warnings: [],
+        duration: 0,
+        testsPassed: 0,
+        testsFailed: 0,
+        testsTotal: 0,
+      };
+    }
+
+    // Step 2.5: Validate frontend build before running E2E tests
+    // This catches TypeScript/build errors that would cause Playwright to fail silently
+    this.logger.log('Validating frontend build before E2E tests...');
+    const frontendBuildCheck = await this.filesystem.executeCommand(
+      projectId,
+      'cd frontend && npm run build 2>&1',
+      { timeout: 120000 },
+    );
+
+    // Check for build errors in output (even if command technically "succeeded")
+    const buildOutput = frontendBuildCheck.stdout + frontendBuildCheck.stderr;
+    const errorLines = buildOutput
+      .split('\n')
+      .filter((line: string) =>
+        line.includes('error TS') ||
+        line.includes('Module not found') ||
+        line.includes('Cannot find module') ||
+        line.includes('has no default export') ||
+        line.includes('Failed to compile')
+      )
+      .slice(0, 20) // Limit to 20 most relevant errors
+      .map((line: string) => line.trim());
+
+    // If build failed OR we found TypeScript errors in output
+    if (!frontendBuildCheck.success || errorLines.length > 0) {
+      this.logger.error(`Frontend build failed before E2E tests: ${errorLines.length} errors found`);
+
+      return {
+        success: false,
+        output: buildOutput.slice(0, 3000),
+        errors: [
+          'Frontend build failed - cannot run E2E tests until build errors are fixed',
+          ...errorLines,
+        ],
+        warnings: [],
+        duration: Date.now() - startTime,
+        testsPassed: 0,
+        testsFailed: 0,
+        testsTotal: 0,
+      };
+    }
+
+    this.logger.log('Frontend build validation passed');
+
+    // Step 3: Check if E2E test files exist
+    const lsResult = await this.filesystem.executeCommand(
+      projectId,
+      'ls -1 tests/e2e/*.spec.ts tests/e2e/*.e2e-spec.ts tests/e2e/*.test.ts 2>/dev/null || true',
+      { timeout: 10000 },
+    );
+    const specFiles = lsResult.stdout
+      .split('\n')
+      .filter((f: string) => f.trim().length > 0)
+      .map((f: string) => f.replace('tests/e2e/', ''));
+
+    if (specFiles.length === 0) {
+      return {
+        success: false,
+        output: 'No E2E test files found in tests/e2e/',
+        errors: ['No E2E test files found - create *.e2e-spec.ts files'],
+        warnings: [],
+        duration: 0,
+        testsPassed: 0,
+        testsFailed: 0,
+        testsTotal: 0,
+      };
+    }
+
+    // Step 4: Install Playwright browsers if needed
+    this.logger.log('Ensuring Playwright browsers are installed...');
+    await this.filesystem.executeCommand(
+      projectId,
+      'npx playwright install chromium --with-deps 2>/dev/null || npx playwright install chromium',
+      { timeout: 120000 },
+    );
+
+    // Step 5: Execute actual Playwright tests against the preview
+    this.logger.log(`Executing Playwright tests against ${previewUrl}...`);
+    const testResult = await this.filesystem.executeCommand(
+      projectId,
+      `BASE_URL=${previewUrl} npx playwright test --reporter=json --project=chromium`,
+      { timeout: 300000 }, // 5 minutes for test execution
+    );
+
+    const duration = Date.now() - startTime;
+
+    // Step 6: Parse Playwright JSON output
+    let testsPassed = 0;
+    let testsFailed = 0;
+    let testsTotal = 0;
+    const errors: string[] = [];
+
+    try {
+      // Playwright JSON reporter outputs to stdout
+      const jsonOutput = testResult.stdout;
+      if (jsonOutput && jsonOutput.includes('"stats"')) {
+        const results = JSON.parse(jsonOutput);
+        testsPassed = results.stats?.expected || 0;
+        testsFailed = results.stats?.unexpected || 0;
+        testsTotal = testsPassed + testsFailed + (results.stats?.skipped || 0);
+
+        // Collect failed test names
+        if (results.suites) {
+          this.collectFailedTests(results.suites, errors);
+        }
+      } else {
+        // Fallback: parse from text output
+        const parsed = this.parsePlaywrightOutput(testResult.stdout + testResult.stderr);
+        testsPassed = parsed.passed;
+        testsFailed = parsed.failed;
+        testsTotal = parsed.total;
+      }
+    } catch (parseError) {
+      this.logger.warn(`Could not parse Playwright JSON output: ${parseError}`);
+      // Fallback: parse from text output
+      const parsed = this.parsePlaywrightOutput(testResult.stdout + testResult.stderr);
+      testsPassed = parsed.passed;
+      testsFailed = parsed.failed;
+      testsTotal = parsed.total;
+    }
+
+    // If no tests were found in output, check if command failed
+    if (testsTotal === 0 && !testResult.success) {
+      errors.push('Playwright test execution failed');
+      if (testResult.stderr) {
+        errors.push(testResult.stderr.slice(0, 500));
+      }
+    }
+
+    const success = testResult.success && testsFailed === 0;
+
+    this.logger.log(
+      `E2E test execution complete: ${testsPassed} passed, ${testsFailed} failed, ${testsTotal} total`,
+    );
+
+    return {
+      success,
+      output: testResult.stdout || `E2E tests: ${testsPassed} passed, ${testsFailed} failed`,
+      errors: errors.length > 0 ? errors : testsFailed > 0 ? [`${testsFailed} E2E tests failed`] : [],
+      warnings: [],
+      duration,
+      testsPassed,
+      testsFailed,
+      testsTotal,
+    };
+  }
+
+  /**
+   * Recursively collect failed test names from Playwright JSON output
+   */
+  private collectFailedTests(suites: any[], errors: string[], prefix = ''): void {
+    for (const suite of suites) {
+      const suiteName = prefix ? `${prefix} > ${suite.title}` : suite.title;
+
+      if (suite.specs) {
+        for (const spec of suite.specs) {
+          if (spec.ok === false) {
+            errors.push(`FAILED: ${suiteName} > ${spec.title}`);
+          }
+        }
+      }
+
+      if (suite.suites) {
+        this.collectFailedTests(suite.suites, errors, suiteName);
+      }
+    }
+  }
+
+  /**
+   * Run integration tests (G6 Testing gate)
+   * Integration tests are optional - success with 0 tests is acceptable.
+   * But if files exist, we should attempt to run them.
+   */
+  async runIntegrationTests(projectId: string): Promise<TestResult> {
+    this.logger.log(`Running integration tests for project ${projectId}`);
+    const startTime = Date.now();
+
+    // Check if integration test files exist
+    const lsResult = await this.filesystem.executeCommand(
+      projectId,
+      'find . -name "*.integration.spec.ts" -o -name "*.integration.test.ts" -o -path "*/integration/*.spec.ts" -o -path "*/integration/*.test.ts" 2>/dev/null | head -20 || true',
+      { timeout: 10000 },
+    );
+
+    const integrationFiles = lsResult.stdout
+      .split('\n')
+      .filter((f: string) => f.trim().length > 0);
+
+    const duration = Date.now() - startTime;
+
+    // If no integration tests exist, that's acceptable (not all projects need them)
+    if (integrationFiles.length === 0) {
+      this.logger.log('No integration test files found - skipping (optional)');
+      return {
+        success: true,
+        output: 'No integration tests configured (optional)',
+        errors: [],
+        warnings: [],
+        duration,
+        testsPassed: 0,
+        testsFailed: 0,
+        testsTotal: 0,
+      };
+    }
+
+    // Integration test files exist - try to run them with Jest or the project's test runner
+    this.logger.log(`Found ${integrationFiles.length} integration test files, attempting to run...`);
+
+    // Check if there's a test:integration script
+    const hasIntegrationScript = await this.hasScript(projectId, 'test:integration');
+
+    if (hasIntegrationScript) {
+      const testResult = await this.filesystem.executeCommand(
+        projectId,
+        'npm run test:integration -- --json 2>/dev/null || npm run test:integration',
+        { timeout: 300000 },
+      );
+
+      // Parse results if available
+      const testStats = await this.parseTestResults(projectId, testResult.stdout);
+
+      return {
+        success: testResult.success && testStats.failed === 0,
+        output: testResult.stdout || `Integration tests executed`,
+        errors: testStats.failed > 0 ? [`${testStats.failed} integration tests failed`] : [],
+        warnings: [],
+        duration: Date.now() - startTime,
+        testsPassed: testStats.passed,
+        testsFailed: testStats.failed,
+        testsTotal: testStats.total,
+      };
+    }
+
+    // No dedicated integration test script - files exist but can't run them automatically
+    // Mark as success with warning (files validated but not executed)
+    return {
+      success: true,
+      output: `Integration test files found: ${integrationFiles.length} files (no test:integration script to run them)\n${integrationFiles.join('\n')}`,
+      errors: [],
+      warnings: [`Found ${integrationFiles.length} integration test files but no 'test:integration' script to run them`],
+      duration,
+      testsPassed: 0,
+      testsFailed: 0,
+      testsTotal: 0,
+    };
+  }
+
+  /**
+   * Run performance tests
+   */
+  async runPerformanceTests(projectId: string): Promise<TestResult> {
+    this.logger.log(`Running performance tests for project ${projectId}`);
+    const startTime = Date.now();
+
+    // Check for performance test script
+    try {
+      const packageJson = await this.filesystem.readFile(projectId, 'package.json');
+      const pkg = JSON.parse(packageJson);
+      if (pkg.scripts?.['test:performance'] || pkg.scripts?.['test:perf']) {
+        const testCommand = pkg.scripts['test:performance']
+          ? 'npm run test:performance'
+          : 'npm run test:perf';
+
+        const result = await this.filesystem.executeCommand(projectId, testCommand, {
+          timeout: 600000,
+        });
+
+        return {
+          success: result.success,
+          output: result.stdout,
+          errors: result.success ? [] : ['Performance tests failed'],
+          warnings: [],
+          duration: Date.now() - startTime,
+          testsPassed: result.success ? 1 : 0,
+          testsFailed: result.success ? 0 : 1,
+          testsTotal: 1,
+        };
+      }
+    } catch {
+      // No performance tests configured
+    }
+
+    return {
+      success: true,
+      output: 'No performance tests configured',
+      errors: [],
+      warnings: ['No performance test configuration found - skipping'],
+      duration: 0,
+      testsPassed: 0,
+      testsFailed: 0,
+      testsTotal: 0,
+    };
+  }
+
+  /**
+   * Parse Playwright test output
+   */
+  private parsePlaywrightOutput(output: string): { passed: number; failed: number; total: number } {
+    const passedMatch = output.match(/(\d+)\s+passed/);
+    const failedMatch = output.match(/(\d+)\s+failed/);
+    const skippedMatch = output.match(/(\d+)\s+skipped/);
+
+    const passed = passedMatch ? parseInt(passedMatch[1]) : 0;
+    const failed = failedMatch ? parseInt(failedMatch[1]) : 0;
+    const skipped = skippedMatch ? parseInt(skippedMatch[1]) : 0;
+
+    return { passed, failed, total: passed + failed + skipped };
   }
 
   /**

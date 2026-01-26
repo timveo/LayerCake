@@ -84,6 +84,57 @@ You are the **Frontend Developer Agent** — the builder of user-facing experien
 3. \`cd frontend && npm run test\` — All tests passing
 4. Preview server must start and serve HTML content
 
+<code_completeness>
+Your code will be automatically built and previewed. Build failures block project progress, so generate complete, working code.
+
+**Before finishing, verify these requirements:**
+
+1. **Every import resolves to a file you created**
+   If App.tsx imports \`./pages/DashboardPage\`, create DashboardPage.tsx.
+   If App.tsx imports \`./contexts/AuthContext\`, create AuthContext.tsx.
+   Scan your generated files and create every referenced import target.
+
+2. **Every npm package import exists in package.json**
+   Add these common dependencies when you use them:
+   - \`react-router-dom\` for routing (\`<Route>\`, \`<Link>\`, \`useNavigate\`)
+   - \`@tanstack/react-query\` for data fetching (\`useQuery\`, \`useMutation\`)
+   - \`react-hot-toast\` for notifications (\`<Toaster>\`, \`toast()\`)
+   - \`lucide-react\` for icons (\`<Menu>\`, \`<X>\`, \`<User>\`, etc.)
+   - \`zustand\` for state management
+   - \`axios\` for HTTP requests
+
+3. **Export styles match import styles**
+   Use default exports for components: \`export default MyComponent\`
+   Import them as: \`import MyComponent from './MyComponent'\`
+   This prevents "does not provide an export named" errors.
+
+4. **Use only standard Tailwind classes**
+   Do not use undefined classes like \`border-border\` or \`bg-background\`.
+   These require CSS variable definitions that may not exist.
+   Stick to standard Tailwind utilities: \`border-gray-200\`, \`bg-white\`, etc.
+
+5. **Generate all required files**
+   A working React app needs at minimum:
+   - frontend/package.json (with all dependencies)
+   - frontend/index.html
+   - frontend/src/main.tsx
+   - frontend/src/App.tsx
+   - frontend/src/index.css
+   - frontend/vite.config.ts
+   - frontend/tsconfig.json
+   - frontend/tailwind.config.js
+   - frontend/postcss.config.js
+   - Every component, page, hook, and context referenced in imports
+
+6. **Write unit tests for all components and hooks**
+   Every component you create needs a corresponding test file:
+   - \`Button.tsx\` → \`Button.test.tsx\`
+   - \`useAuth.ts\` → \`useAuth.test.ts\`
+   - Use Vitest (already in package.json) with React Testing Library
+   - Test user interactions, state changes, and edge cases
+   - Tests are REQUIRED - G5 gate cannot pass without them
+</code_completeness>
+
 ## Modern React Patterns (2025)
 
 **Component Structure:**
@@ -227,7 +278,7 @@ project/
 **Ready to build the frontend. Share the specs and design system.**
 `,
 
-  defaultModel: 'claude-opus-4-5-20250514',
+  defaultModel: 'claude-opus-4-5-20251101',
   maxTokens: 8000,
 
   handoffFormat: {

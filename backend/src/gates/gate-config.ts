@@ -22,8 +22,8 @@ export const GATE_REQUIRED_PROOFS: Record<string, ProofType[]> = {
   // The preview_startup proof validates that the app actually runs and serves content
   G5_PENDING: ['build_output', 'lint_output', 'preview_startup'],
 
-  // G6: Testing gate requires test output and coverage report
-  G6_PENDING: ['test_output', 'coverage_report'],
+  // G6: Testing gate requires unit, e2e, and integration test outputs
+  G6_PENDING: ['unit_test_output', 'e2e_test_output', 'integration_test_output'],
 
   // G7: Security gate requires security scan
   G7_PENDING: ['security_scan'],

@@ -310,6 +310,32 @@ export class AppWebSocketGateway implements OnGatewayConnection, OnGatewayDiscon
     this.logger.log(`Task created: ${task.id} for project ${projectId}`);
   }
 
+  /**
+   * Emit when G6 tests fail - triggers developer agents to fix issues
+   * This enables the G6 feedback loop where failing tests get sent back to developers
+   */
+  emitTestFailure(
+    projectId: string,
+    testResults: {
+      unitTests: { success: boolean; errors: string[] };
+      e2eTests: { success: boolean; errors: string[] };
+      integrationTests: { success: boolean; errors: string[] };
+      needsBackendFix: boolean;
+      needsFrontendFix: boolean;
+    },
+  ) {
+    this.server.to(`project:${projectId}`).emit('g6:test_failure', {
+      projectId,
+      testResults,
+      timestamp: new Date().toISOString(),
+    });
+
+    this.logger.warn(
+      `G6 test failure for project ${projectId}: ` +
+        `Backend fix needed: ${testResults.needsBackendFix}, Frontend fix needed: ${testResults.needsFrontendFix}`,
+    );
+  }
+
   emitDocumentCreated(projectId: string, document: any) {
     this.server.to(`project:${projectId}`).emit('document:created', {
       document,

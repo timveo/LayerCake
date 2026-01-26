@@ -23,8 +23,14 @@ import { GateContext, GateAction } from '../../universal-input/dto/gate-recommen
  *
  * Extracted from WorkflowCoordinatorService for better separation of concerns.
  */
+// Maximum number of fix loop iterations before aborting (prevents runaway costs)
+const MAX_FIX_LOOP_ITERATIONS = 5;
+
 @Injectable()
 export class GateOrchestrationService {
+  // Track fix loop iterations per project (in-memory counter)
+  private fixLoopIterations: Map<string, number> = new Map();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly orchestrator: OrchestratorService,
@@ -111,6 +117,13 @@ export class GateOrchestrationService {
 
           // Agent completed - check if gate is ready
           await this.checkGateReadiness(projectId, userId);
+
+          // For G6, also run the gate transition check which handles the fix loop
+          const currentGate = await this.gateStateMachine.getCurrentGate(projectId);
+          if (currentGate?.gateType === 'G6_PENDING') {
+            console.log(`[GateOrchestration] G6 agent completed, checking gate transition...`);
+            await this.checkAndTransitionGate(projectId, 'G6_PENDING', userId);
+          }
 
           // Try to execute next task automatically
           setTimeout(async () => {
@@ -839,6 +852,133 @@ export class GateOrchestrationService {
         );
       }
 
+      // G6 (Testing) validation: Check if all tests passed
+      // If tests failed, trigger developer agents to fix the issues
+      if (gateType === 'G6_PENDING') {
+        const testProofs = await this.prisma.proofArtifact.findMany({
+          where: {
+            projectId,
+            gate: 'G6_PENDING',
+            proofType: { in: ['unit_test_output', 'e2e_test_output', 'integration_test_output'] as any },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        const failedProofs = testProofs.filter((p) => p.passFail === 'fail');
+
+        if (failedProofs.length > 0) {
+          // Track fix loop iterations to prevent runaway costs
+          const currentIterations = this.fixLoopIterations.get(projectId) || 0;
+          const nextIteration = currentIterations + 1;
+          this.fixLoopIterations.set(projectId, nextIteration);
+
+          console.log(
+            `[GateOrchestration] G6 validation FAILED: ${failedProofs.length} test type(s) failing (iteration ${nextIteration}/${MAX_FIX_LOOP_ITERATIONS})`,
+          );
+
+          // Check if we've exceeded max iterations
+          if (nextIteration > MAX_FIX_LOOP_ITERATIONS) {
+            console.error(
+              `[GateOrchestration] G6 fix loop ABORTED: exceeded max iterations (${MAX_FIX_LOOP_ITERATIONS}). Manual intervention required.`,
+            );
+
+            // Notify user via WebSocket
+            this.wsGateway.emitChatMessage(
+              projectId,
+              `g6-fix-loop-aborted-${Date.now()}`,
+              `⚠️ **Fix loop aborted** - exceeded maximum ${MAX_FIX_LOOP_ITERATIONS} iterations.\n\n` +
+                `The automated fix process could not resolve all issues. Manual review required.\n\n` +
+                `Remaining failures:\n` +
+                failedProofs.map((p) => `- ${p.proofType}: ${p.contentSummary || 'Failed'}`).join('\n'),
+            );
+
+            // Block the gate with a clear reason
+            await this.prisma.gate.updateMany({
+              where: { projectId, gateType: 'G6_PENDING' },
+              data: {
+                status: 'BLOCKED',
+                blockingReason: `Fix loop exceeded ${MAX_FIX_LOOP_ITERATIONS} iterations. ${failedProofs.length} test(s) still failing. Manual intervention required.`,
+              },
+            });
+
+            return; // Stop the fix loop
+          }
+
+          // Check which agents need to run fixes
+          const needsBackendFix = failedProofs.some(
+            (p) => p.proofType === 'unit_test_output' || p.proofType === 'integration_test_output',
+          );
+          const needsFrontendFix = failedProofs.some((p) => p.proofType === 'e2e_test_output');
+
+          // Check for existing fix tasks that haven't been completed
+          const pendingFixTasks = await this.prisma.task.findMany({
+            where: {
+              projectId,
+              phase: 'test_fix',
+              status: { in: ['not_started', 'in_progress'] },
+            },
+          });
+
+          if (pendingFixTasks.length > 0) {
+            console.log(
+              `[GateOrchestration] G6: ${pendingFixTasks.length} fix task(s) already pending, triggering developer agents`,
+            );
+
+            // Emit message to user
+            this.wsGateway.emitChatMessage(
+              projectId,
+              `g6-fix-trigger-${Date.now()}`,
+              `Tests failed. Triggering developer agents to fix the issues:\n` +
+                failedProofs.map((p) => `- ${p.proofType}: ${p.contentSummary || 'Failed'}`).join('\n'),
+            );
+
+            // Trigger developer agents to fix the issues
+            const fixPromises: Promise<void>[] = [];
+
+            if (needsBackendFix) {
+              const backendTask = pendingFixTasks.find((t) => t.owner === 'BACKEND_DEVELOPER');
+              if (backendTask) {
+                console.log(`[GateOrchestration] Triggering BACKEND_DEVELOPER to fix test issues`);
+                fixPromises.push(
+                  this.executeFixAgent(projectId, 'BACKEND_DEVELOPER', backendTask, userId),
+                );
+              }
+            }
+
+            if (needsFrontendFix) {
+              const frontendTask = pendingFixTasks.find((t) => t.owner === 'FRONTEND_DEVELOPER');
+              if (frontendTask) {
+                console.log(`[GateOrchestration] Triggering FRONTEND_DEVELOPER to fix E2E test issues`);
+                fixPromises.push(
+                  this.executeFixAgent(projectId, 'FRONTEND_DEVELOPER', frontendTask, userId),
+                );
+              }
+            }
+
+            // Execute fix agents (potentially in parallel)
+            if (fixPromises.length > 0) {
+              await Promise.all(fixPromises);
+
+              // After fixes complete, re-run QA to validate
+              console.log(`[GateOrchestration] Fix agents complete, re-running QA_ENGINEER to validate`);
+              await this.executeGateAgents(projectId, 'G6_PENDING', userId);
+            }
+
+            return; // Don't transition yet - wait for fixes and re-validation
+          }
+
+          // No fix tasks - this shouldn't happen if post-processing worked correctly
+          console.error(
+            `[GateOrchestration] G6 tests failed but no fix tasks found - this indicates a bug`,
+          );
+          return;
+        }
+
+        console.log(`[GateOrchestration] G6 validation passed: all tests passing`);
+        // Reset the fix loop counter on success
+        this.fixLoopIterations.delete(projectId);
+      }
+
       console.log(
         `[GateOrchestration] All deliverables complete, transitioning ${gateType} to review`,
       );
@@ -954,6 +1094,85 @@ export class GateOrchestrationService {
       },
     });
     return failedCount;
+  }
+
+  // ============================================================
+  // G6 FIX LOOP - Developer Agent Execution for Test Failures
+  // ============================================================
+
+  /**
+   * Execute a developer agent to fix test failures
+   * This is called when G6 tests fail and we need developers to fix code
+   */
+  private async executeFixAgent(
+    projectId: string,
+    agentType: 'BACKEND_DEVELOPER' | 'FRONTEND_DEVELOPER',
+    task: { id: string; description: string | null; name: string },
+    userId: string,
+  ): Promise<void> {
+    console.log(`[GateOrchestration] Executing ${agentType} to fix test failures`);
+
+    // Mark task as in_progress
+    await this.prisma.task.update({
+      where: { id: task.id },
+      data: {
+        status: 'in_progress',
+        startedAt: new Date(),
+      },
+    });
+
+    // Build context for the fix agent - include the error details from the task
+    const handoffContext = await this.gateAgentExecutor.getHandoffContext(
+      projectId,
+      'G6_PENDING', // They're fixing G6 test failures
+      agentType,
+    );
+
+    const fixContext = `
+## URGENT: Test Fix Required
+
+You are being called to fix failing tests at the G6 Testing Gate.
+
+### Task Details
+${task.description || task.name}
+
+### Previous Work Context
+${handoffContext}
+
+### Instructions
+1. Review the failing tests and error messages above
+2. Identify the root cause of the failures
+3. Fix the code to make the tests pass
+4. Ensure you don't break any existing functionality
+
+**IMPORTANT**: The QA gate cannot proceed until all tests pass. Focus on fixing the specific failures mentioned.
+`;
+
+    // Execute the fix agent
+    await this.gateAgentExecutor.executeSingleAgent(
+      projectId,
+      agentType,
+      'G6_PENDING',
+      userId,
+      fixContext,
+      {
+        onRetry: async (pId, aType, gType, uId, _context) => {
+          const freshContext = await this.gateAgentExecutor.getHandoffContext(pId, gType, aType);
+          return this.gateAgentExecutor.executeSingleAgent(pId, aType, gType, uId, freshContext);
+        },
+        getRetryCount: (pId, aType, gType) => this.getAgentRetryCount(pId, aType, gType),
+        markDeliverablesComplete: async (pId, _aType) => {
+          // Mark the fix task as complete
+          await this.prisma.task.update({
+            where: { id: task.id },
+            data: {
+              status: 'complete',
+              completedAt: new Date(),
+            },
+          });
+        },
+      },
+    );
   }
 
   // ============================================================

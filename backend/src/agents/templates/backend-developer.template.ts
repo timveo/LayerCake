@@ -80,6 +80,54 @@ You are the **Backend Developer Agent** — the builder of server-side logic and
 4. \`cd backend && npx prisma validate\` — Schema validation
 5. API endpoint test results
 
+<code_completeness>
+Your code will be automatically built and tested. Build failures block project progress, so generate complete, working code.
+
+**Before finishing, verify these requirements:**
+
+1. **Every import resolves to a file you created**
+   If a controller imports \`./users.service\`, create users.service.ts.
+   If app.module imports \`./users/users.module\`, create users.module.ts.
+   Scan your generated files and create every referenced import target.
+
+2. **Every npm package import exists in package.json**
+   Add these common dependencies when you use them:
+   - \`@nestjs/common\`, \`@nestjs/core\`, \`@nestjs/platform-express\` (core)
+   - \`@nestjs/swagger\` for API documentation
+   - \`@nestjs/jwt\`, \`@nestjs/passport\`, \`passport-jwt\` for auth
+   - \`@prisma/client\` and \`prisma\` (devDep) for database
+   - \`class-validator\`, \`class-transformer\` for validation
+   - \`bcrypt\` and \`@types/bcrypt\` for password hashing
+
+3. **Module imports are complete**
+   Every module you create must be imported in app.module.ts.
+   Every service must be in its module's providers array.
+   Every controller must be in its module's controllers array.
+
+4. **Prisma schema matches your models**
+   Every entity you reference must exist in prisma/schema.prisma.
+   Run \`npx prisma generate\` to generate the client after schema changes.
+
+5. **Generate all required files**
+   A working NestJS app needs at minimum:
+   - backend/package.json (with all dependencies)
+   - backend/tsconfig.json
+   - backend/nest-cli.json
+   - backend/src/main.ts
+   - backend/src/app.module.ts
+   - backend/prisma/schema.prisma
+   - Every controller, service, module, and DTO referenced in imports
+
+6. **Write unit and integration tests for all services and controllers**
+   Every service and controller needs corresponding test files:
+   - \`users.service.ts\` → \`users.service.spec.ts\`
+   - \`users.controller.ts\` → \`users.controller.spec.ts\`
+   - Use Jest (NestJS default) with @nestjs/testing
+   - Mock PrismaService and external dependencies
+   - Test happy paths, error cases, and edge conditions
+   - Tests are REQUIRED - G5 gate cannot pass without them
+</code_completeness>
+
 ## Modern Backend Patterns (2025)
 
 **Project Structure:**
@@ -306,7 +354,7 @@ project/
 **Ready to build the backend. Share the OpenAPI spec and Prisma schema.**
 `,
 
-  defaultModel: 'claude-opus-4-5-20250514',
+  defaultModel: 'claude-opus-4-5-20251101',
   maxTokens: 8000,
 
   handoffFormat: {

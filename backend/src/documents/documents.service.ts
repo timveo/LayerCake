@@ -454,13 +454,13 @@ export class DocumentsService {
         break;
 
       case 'QA_ENGINEER':
-        // Extract test plan
+        // Extract test plan - use full output since QA creates code blocks with test files
+        // The extractSection method doesn't handle content inside markdown code blocks well
+        // For QA_ENGINEER, the full output contains the test plan + test file code blocks
         documents.push({
           type: 'TEST_PLAN',
           title: 'Test Plan and Coverage Report',
-          content:
-            this.extractSection(cleanedOutput, ['# Test Plan', '# Testing', '## Test Coverage']) ||
-            cleanedOutput,
+          content: cleanedOutput,
         });
         break;
 

@@ -8,9 +8,17 @@ import { EventsModule } from '../events/events.module';
 import { RisksModule } from '../risks/risks.module';
 import { DecisionsModule } from '../decisions/decisions.module';
 import { DeliverablesModule } from '../deliverables/deliverables.module';
+import { CodeGenerationModule } from '../code-generation/code-generation.module';
 
 @Module({
-  imports: [PrismaModule, EventsModule, RisksModule, DecisionsModule, DeliverablesModule],
+  imports: [
+    PrismaModule,
+    EventsModule,
+    RisksModule,
+    DecisionsModule,
+    DeliverablesModule,
+    CodeGenerationModule,
+  ],
   controllers: [GatesController],
   providers: [GatesService, GateStateMachineService, G1PresentationService],
   exports: [GatesService, GateStateMachineService, G1PresentationService],

@@ -138,6 +138,12 @@ export class PreviewServerService implements OnModuleDestroy {
       `Starting ${projectType} dev server for project ${projectId} in ${workingDir} on port ${port}`,
     );
 
+    // Ensure dependencies are installed (handles cross-platform native module issues)
+    await this.ensureDependenciesInstalled(serverWorkingDir);
+
+    // Validate code before preview (check for common issues)
+    await this.validateCodeBeforePreview(projectId, serverWorkingDir);
+
     // Create server record
     const server: PreviewServer = {
       projectId,
@@ -480,6 +486,268 @@ export class PreviewServerService implements OnModuleDestroy {
   private releasePort(port: number): void {
     // Port is automatically available once process stops
     this.logger.debug(`Released port ${port}`);
+  }
+
+  /**
+   * Ensure dependencies are installed for the project
+   * This handles cross-platform native module issues (e.g., macOS -> Linux container)
+   */
+  private async ensureDependenciesInstalled(workingDir: string): Promise<void> {
+    const fs = await import('fs-extra');
+    const nodeModulesPath = path.join(workingDir, 'node_modules');
+
+    // Check if we need to reinstall (missing node_modules or platform mismatch)
+    const hasNodeModules = await fs.pathExists(nodeModulesPath);
+
+    if (!hasNodeModules) {
+      this.logger.log(`Installing dependencies in ${workingDir}...`);
+      await this.runNpmInstall(workingDir);
+      return;
+    }
+
+    // Check for platform mismatch by looking for a marker file
+    const platformMarkerPath = path.join(nodeModulesPath, '.platform');
+    const currentPlatform = `${process.platform}-${process.arch}`;
+    let installedPlatform = '';
+
+    try {
+      installedPlatform = await fs.readFile(platformMarkerPath, 'utf-8');
+    } catch {
+      // No marker file - assume platform mismatch for safety
+      installedPlatform = 'unknown';
+    }
+
+    if (installedPlatform.trim() !== currentPlatform) {
+      this.logger.log(
+        `Platform mismatch detected (installed: ${installedPlatform.trim() || 'unknown'}, current: ${currentPlatform}). Reinstalling dependencies...`,
+      );
+      // Remove node_modules and reinstall
+      await fs.remove(nodeModulesPath);
+      await this.runNpmInstall(workingDir);
+
+      // Write platform marker
+      await fs.writeFile(platformMarkerPath, currentPlatform);
+    }
+  }
+
+  /**
+   * Validate code before starting preview - check for common issues
+   * This catches problems like missing imports, undefined dependencies, etc.
+   */
+  private async validateCodeBeforePreview(
+    projectId: string,
+    workingDir: string,
+  ): Promise<void> {
+    const fs = await import('fs-extra');
+    const issues: string[] = [];
+
+    // Read package.json to get declared dependencies
+    const packageJsonPath = path.join(workingDir, 'package.json');
+    let packageJson: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> } = {};
+
+    try {
+      const content = await fs.readFile(packageJsonPath, 'utf-8');
+      packageJson = JSON.parse(content);
+    } catch {
+      issues.push('Missing or invalid package.json');
+    }
+
+    const declaredDeps = {
+      ...packageJson.dependencies,
+      ...packageJson.devDependencies,
+    };
+
+    // Scan source files for imports
+    const srcPath = path.join(workingDir, 'src');
+    if (await fs.pathExists(srcPath)) {
+      const sourceFiles = await this.findSourceFiles(srcPath);
+
+      for (const file of sourceFiles) {
+        const content = await fs.readFile(file, 'utf-8');
+        const fileIssues = await this.validateFileImports(
+          file,
+          content,
+          workingDir,
+          declaredDeps,
+        );
+        issues.push(...fileIssues);
+      }
+    }
+
+    // Check for common missing dependencies
+    const commonMissingDeps = await this.checkCommonDependencies(workingDir, declaredDeps);
+    issues.push(...commonMissingDeps);
+
+    // Log issues but don't block preview (let build errors surface naturally)
+    if (issues.length > 0) {
+      this.logger.warn(
+        `Pre-preview validation found ${issues.length} potential issues for project ${projectId}:`,
+      );
+      issues.slice(0, 10).forEach((issue) => this.logger.warn(`  - ${issue}`));
+      if (issues.length > 10) {
+        this.logger.warn(`  ... and ${issues.length - 10} more issues`);
+      }
+    }
+  }
+
+  /**
+   * Find all TypeScript/JavaScript source files in a directory
+   */
+  private async findSourceFiles(dir: string): Promise<string[]> {
+    const fs = await import('fs-extra');
+    const files: string[] = [];
+
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory() && entry.name !== 'node_modules') {
+        files.push(...(await this.findSourceFiles(fullPath)));
+      } else if (
+        entry.isFile() &&
+        /\.(tsx?|jsx?)$/.test(entry.name) &&
+        !entry.name.endsWith('.d.ts')
+      ) {
+        files.push(fullPath);
+      }
+    }
+
+    return files;
+  }
+
+  /**
+   * Validate imports in a source file
+   */
+  private async validateFileImports(
+    filePath: string,
+    content: string,
+    workingDir: string,
+    declaredDeps: Record<string, string>,
+  ): Promise<string[]> {
+    const fs = await import('fs-extra');
+    const issues: string[] = [];
+    const relativePath = path.relative(workingDir, filePath);
+
+    // Match import statements
+    const importRegex = /import\s+(?:[\w{},*\s]+\s+from\s+)?['"]([^'"]+)['"]/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = importRegex.exec(content)) !== null) {
+      const importPath = match[1];
+
+      // Check relative imports (local files)
+      if (importPath.startsWith('.')) {
+        const resolvedPath = path.resolve(path.dirname(filePath), importPath);
+        const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js'];
+        let found = false;
+
+        for (const ext of extensions) {
+          if (await fs.pathExists(resolvedPath + ext)) {
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          issues.push(`${relativePath}: Missing import target '${importPath}'`);
+        }
+      }
+      // Check npm package imports
+      else if (!importPath.startsWith('@/') && !importPath.startsWith('~')) {
+        // Extract package name (handle scoped packages)
+        const packageName = importPath.startsWith('@')
+          ? importPath.split('/').slice(0, 2).join('/')
+          : importPath.split('/')[0];
+
+        // Skip built-in Node modules
+        const builtins = ['fs', 'path', 'http', 'https', 'url', 'crypto', 'stream', 'util', 'os', 'child_process'];
+        if (!builtins.includes(packageName) && !declaredDeps[packageName]) {
+          issues.push(`${relativePath}: Package '${packageName}' not in package.json`);
+        }
+      }
+    }
+
+    return issues;
+  }
+
+  /**
+   * Check for commonly missed dependencies based on code patterns
+   */
+  private async checkCommonDependencies(
+    workingDir: string,
+    declaredDeps: Record<string, string>,
+  ): Promise<string[]> {
+    const fs = await import('fs-extra');
+    const issues: string[] = [];
+    const srcPath = path.join(workingDir, 'src');
+
+    if (!(await fs.pathExists(srcPath))) {
+      return issues;
+    }
+
+    // Read all source files to check for common patterns
+    const sourceFiles = await this.findSourceFiles(srcPath);
+    let allContent = '';
+    for (const file of sourceFiles.slice(0, 50)) {
+      // Limit to first 50 files
+      try {
+        allContent += await fs.readFile(file, 'utf-8');
+      } catch {
+        // Ignore read errors
+      }
+    }
+
+    // Check for common patterns and their required dependencies
+    const patterns: Array<{ pattern: RegExp; dep: string; description: string }> = [
+      { pattern: /<Toaster|toast\(/, dep: 'react-hot-toast', description: 'toast notifications' },
+      { pattern: /<(Menu|X|User|ShoppingCart|Heart|Mail|Phone|MapPin|ChevronDown|Plus|Minus|Search|Settings|Home|LogOut|Bell|Calendar|Clock|Check|AlertCircle)\s/, dep: 'lucide-react', description: 'Lucide icons' },
+      { pattern: /useQuery|useMutation|QueryClient/, dep: '@tanstack/react-query', description: 'React Query' },
+      { pattern: /<(Route|Link|BrowserRouter|Routes)\s|useNavigate|useParams|useLocation/, dep: 'react-router-dom', description: 'React Router' },
+      { pattern: /create\(|useStore/, dep: 'zustand', description: 'Zustand state management' },
+      { pattern: /useForm|Controller.*react-hook-form/, dep: 'react-hook-form', description: 'React Hook Form' },
+      { pattern: /z\.string|z\.object|z\.number/, dep: 'zod', description: 'Zod validation' },
+      { pattern: /axios\.(get|post|put|delete|patch)|axios\.create/, dep: 'axios', description: 'Axios HTTP client' },
+    ];
+
+    for (const { pattern, dep, description } of patterns) {
+      if (pattern.test(allContent) && !declaredDeps[dep]) {
+        issues.push(`Code uses ${description} but '${dep}' is not in package.json`);
+      }
+    }
+
+    return issues;
+  }
+
+  /**
+   * Run npm install in a directory
+   */
+  private async runNpmInstall(workingDir: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const npmProcess = spawn('npm', ['install'], {
+        cwd: workingDir,
+        shell: true,
+        stdio: 'pipe',
+      });
+
+      let stderr = '';
+
+      npmProcess.stderr?.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      npmProcess.on('close', (code) => {
+        if (code === 0) {
+          this.logger.log(`npm install completed in ${workingDir}`);
+          resolve();
+        } else {
+          this.logger.error(`npm install failed in ${workingDir}: ${stderr}`);
+          reject(new Error(`npm install failed with code ${code}: ${stderr}`));
+        }
+      });
+
+      npmProcess.on('error', (err) => {
+        reject(err);
+      });
+    });
   }
 
   /**

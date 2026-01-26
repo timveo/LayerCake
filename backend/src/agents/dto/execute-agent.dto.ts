@@ -3,6 +3,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum AIModel {
   CLAUDE_OPUS_4 = 'claude-opus-4-20250514',
+  CLAUDE_OPUS_4_5 = 'claude-opus-4-5-20251101',
   CLAUDE_SONNET_4 = 'claude-sonnet-4-20250514',
   GPT_4O = 'gpt-4o',
   GPT_4O_MINI = 'gpt-4o-mini',
